@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>1С-стиль: таблицы с поиском, фильтрацией, сортировкой + выбор из справочника</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+        }
+
+        body {
+            background: #e9eef3;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+        }
+
+        .app-container {
+            max-width: 1600px;
+            width: 100%;
+            background: white;
+            border-radius: 28px;
+            box-shadow: 0 20px 35px -12px rgba(0, 0, 0, 0.15);
+            display: flex;
+            overflow: hidden;
+            min-height: 700px;
+        }
+
+        .sidebar {
+            width: 260px;
+            background: #f8fafc;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            padding: 24px 0 20px 0;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 0 20px 16px 20px;
+            font-weight: 600;
+            font-size: 18px;
+            color: #0f172a;
+            border-bottom: 1px solid #e2edf2;
+            margin-bottom: 16px;
+        }
+
+        .table-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 0 12px;
+        }
+
+        .table-item {
+            padding: 10px 16px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: transparent;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .table-item:hover {
+            background: #e6edf4;
+        }
+
+        .table-item.active {
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            color: #2563eb;
+            font-weight: 600;
+            border-left: 3px solid #2563eb;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 24px 28px;
+            background: #ffffff;
+            overflow-x: auto;
+        }
+
+        .page-title {
+            font-size: 1.6rem;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 6px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: #f1f5f9;
+            padding: 6px 12px;
+            border-radius: 40px;
+        }
+
+        .search-box input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            padding: 8px 0;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-select {
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid #cbd5e1;
+            background: white;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .clear-filters {
+            background: #eef2ff;
+            border: none;
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .data-table-wrapper {
+            overflow-x: auto;
+            border-radius: 20px;
+            border: 1px solid #e2edf2;
+            background: white;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            min-width: 600px;
+        }
+
+        th {
+            background-color: #f1f5f9;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        th:hover {
+            background-color: #e6edf4;
+        }
+
+        .sort-icon {
+            margin-left: 6px;
+            font-size: 11px;
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ecf3f9;
+            vertical-align: middle;
+        }
+
+        .cell-editor {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .autocomplete-input, .normal-input {
+            flex: 1;
+            padding: 6px 10px;
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            font-size: 13px;
+            background: white;
+        }
+
+        .table-icon-btn {
+            background: #eef2ff;
+            border: none;
+            border-radius: 8px;
+            width: 28px;
+            height: 28px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .autocomplete-list {
+            position: absolute;
+            background: white;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            max-height: 180px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            min-width: 160px;
+        }
+
+        .autocomplete-item {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        .autocomplete-item:hover {
+            background-color: #eef2ff;
+        }
+
+        .btn-small {
+            background: #eef2ff;
+            border: none;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #2563eb;
+            cursor: pointer;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 18px 24px;
+            border-bottom: 1px solid #e2e8f0;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .modal-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .modal-table tr {
+            cursor: pointer;
+        }
+
+        .modal-table tr:hover {
+            background: #f8fafc;
+        }
+
+        .modal-table td, .modal-table th {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .info-note {
+            margin-top: 20px;
+            background: #f8fafc;
+            border-radius: 18px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #334155;
+        }
+
+        @media (max-width: 800px) {
+            .app-container {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid #e2e8f0;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-header">📋 Таблицы</div>
+        <div class="table-list" id="table-list-container"></div>
+        <div class="info-note">
+            🔍 <strong>Возможности:</strong><br>
+            • Поиск по всем полям<br>
+            • Фильтр по каждому столбцу<br>
+            • Сортировка (клик по заголовку)<br>
+            • 📋 — выбор из справочника
+        </div>
+    </div>
+    <div class="main-content" id="main-content">
+        <div style="text-align: center; padding: 60px;">Загрузка...</div>
+    </div>
+</div>
+
+<script>
+    // ======================== МОДЕЛЬ ДАННЫХ ========================
+    const state = {
+        tables: {
+            "Главная таблица": {
+                type: "main",
+                columns: ["Товар", "Категория", "Количество", "Цена"],
+                data: [
+                    { "Товар": "Ноутбук", "Категория": "Электроника", "Количество": 5, "Цена": 75000 },
+                    { "Товар": "Флешка", "Категория": "Аксессуары", "Количество": 20, "Цена": 1200 },
+                    { "Товар": "Монитор", "Категория": "Электроника", "Количество": 3, "Цена": 23500 },
+                    { "Товар": "Клавиатура", "Категория": "Аксессуары", "Количество": 7, "Цена": 4500 },
+                    { "Товар": "Мышь", "Категория": "Аксессуары", "Количество": 12, "Цена": 1800 }
+                ],
+                referenceColumns: {
+                    "Товар": { refTable: "Товары", refField: "Наименование" },
+                    "Категория": { refTable: "Категории", refField: "Название" }
+                }
+            },
+            "Товары": {
+                type: "reference",
+                columns: ["Наименование", "Артикул", "Производитель"],
+                data: [
+                    { "Наименование": "Ноутбук", "Артикул": "NB-001", "Производитель": "Asus" },
+                    { "Наименование": "Флешка", "Артикул": "FL-042", "Производитель": "Kingston" },
+                    { "Наименование": "Монитор", "Артикул": "MN-099", "Производитель": "Dell" },
+                    { "Наименование": "Клавиатура", "Артикул": "KB-123", "Производитель": "Logitech" },
+                    { "Наименование": "Мышь", "Артикул": "MS-456", "Производитель": "Logitech" }
+                ]
+            },
+            "Категории": {
+                type: "reference",
+                columns: ["Название", "Описание"],
+                data: [
+                    { "Название": "Электроника", "Описание": "Техника и гаджеты" },
+                    { "Название": "Аксессуары", "Описание": "Дополнительные устройства" },
+                    { "Название": "Бытовая техника", "Описание": "Для дома и кухни" }
+                ]
+            },
+            "Доп. настройки": {
+                type: "other",
+                columns: ["Параметр", "Значение", "Комментарий"],
+                data: [
+                    { "Параметр": "Скидка", "Значение": "5%", "Комментарий": "Постоянным клиентам" },
+                    { "Параметр": "Валюта", "Значение": "RUB", "Комментарий": "Российский рубль" }
+                ]
+            }
+        },
+        currentTableName: "Главная таблица",
+        // состояние UI для текущей таблицы
+        uiState: {
+            searchQuery: "",
+            columnFilters: {},    // { "Товар": "Ноутбук", ... }
+            sortColumn: null,
+            sortDirection: "asc"
+        }
+    };
+
+    // Вспомогательные функции для работы со справочниками
+    function getReferenceValues(columnName) {
+        const mainTable = state.tables["Главная таблица"];
+        if (!mainTable.referenceColumns?.[columnName]) return [];
+        const refConfig = mainTable.referenceColumns[columnName];
+        const refTable = state.tables[refConfig.refTable];
+        if (!refTable) return [];
+        const field = refConfig.refField;
+        return refTable.data.map(row => row[field]).filter(v => v && v !== "");
+    }
+
+    function addToReference(columnName, newValue) {
+        if (!newValue || newValue.trim() === "") return false;
+        const mainTable = state.tables["Главная таблица"];
+        const refConfig = mainTable.referenceColumns[columnName];
+        const refTable = state.tables[refConfig.refTable];
+        const field = refConfig.refField;
+        const exists = refTable.data.some(row => String(row[field]).toLowerCase() === newValue.trim().toLowerCase());
+        if (!exists) {
+            const newRow = {};
+            newRow[field] = newValue.trim();
+            // для товаров можно добавить пустые поля, для категорий тоже
+            refTable.columns.forEach(col => { if (!newRow[col]) newRow[col] = ""; });
+            refTable.data.push(newRow);
+            return true;
+        }
+        return false;
+    }
+
+    function updateMainCell(rowIndex, columnName, newValue) {
+        const mainTable = state.tables["Главная таблица"];
+        if (!mainTable) return;
+        const row = mainTable.data[rowIndex];
+        if (!row) return;
+        row[columnName] = newValue;
+        if (mainTable.referenceColumns?.[columnName] && newValue && newValue.trim() !== "") {
+            const added = addToReference(columnName, newValue);
+            if (added) showToast(`✅ "${newValue}" добавлено в справочник`, 1200);
+        }
+        if (state.currentTableName === "Главная таблица") renderCurrentTable();
+    }
+
+    function updateAnyTableCell(tableName, rowIndex, columnName, newValue) {
+        const table = state.tables[tableName];
+        if (table && table.data[rowIndex]) {
+            table.data[rowIndex][columnName] = newValue;
+            if (state.currentTableName === tableName) renderCurrentTable();
+            if ((tableName === "Товары" || tableName === "Категории") && state.currentTableName === "Главная таблица") {
+                renderCurrentTable();
+            }
+        }
+    }
+
+    function addRowToTable(tableName) {
+        const table = state.tables[tableName];
+        if (!table) return;
+        const newRow = {};
+        table.columns.forEach(col => { newRow[col] = ""; });
+        table.data.push(newRow);
+        renderCurrentTable();
+    }
+
+    function deleteRowFromTable(tableName, rowIndex) {
+        const table = state.tables[tableName];
+        if (table && table.data.length > rowIndex) {
+            table.data.splice(rowIndex, 1);
+            renderCurrentTable();
+            showToast(`Строка удалена`, 1000);
+        }
+    }
+
+    function showToast(message, duration = 1500) {
+        let toastEl = document.getElementById('dynamic-toast');
+        if (!toastEl) {
+            toastEl = document.createElement('div');
+            toastEl.id = 'dynamic-toast';
+            toastEl.style.position = 'fixed';
+            toastEl.style.bottom = '24px';
+            toastEl.style.left = '50%';
+            toastEl.style.transform = 'translateX(-50%)';
+            toastEl.style.backgroundColor = '#1f2937';
+            toastEl.style.color = 'white';
+            toastEl.style.padding = '8px 18px';
+            toastEl.style.borderRadius = '40px';
+            toastEl.style.fontSize = '13px';
+            toastEl.style.zIndex = '1002';
+            document.body.appendChild(toastEl);
+        }
+        toastEl.textContent = message;
+        toastEl.style.opacity = '1';
+        if (window.toastTimeout) clearTimeout(window.toastTimeout);
+        window.toastTimeout = setTimeout(() => { toastEl.style.opacity = '0'; }, duration);
+    }
+
+    // Фильтрация и сортировка данных
+    function filterAndSortData(table, ui) {
+        let filtered = [...table.data];
+        // Глобальный поиск
+        if (ui.searchQuery.trim()) {
+            const query = ui.searchQuery.toLowerCase();
+            filtered = filtered.filter(row => {
+                return Object.values(row).some(val => 
+                    String(val).toLowerCase().includes(query)
+                );
+            });
+        }
+        // Фильтры по столбцам
+        for (const [col, filterValue] of Object.entries(ui.columnFilters)) {
+            if (filterValue && filterValue !== "") {
+                filtered = filtered.filter(row => String(row[col]) === filterValue);
+            }
+        }
+        // Сортировка
+        if (ui.sortColumn) {
+            filtered.sort((a, b) => {
+                let aVal = a[ui.sortColumn];
+                let bVal = b[ui.sortColumn];
+                const isNum = !isNaN(parseFloat(aVal)) && isFinite(aVal) && !isNaN(parseFloat(bVal)) && isFinite(bVal);
+                if (isNum) {
+                    aVal = parseFloat(aVal);
+                    bVal = parseFloat(bVal);
+                } else {
+                    aVal = String(aVal).toLowerCase();
+                    bVal = String(bVal).toLowerCase();
+                }
+                if (aVal < bVal) return ui.sortDirection === "asc" ? -1 : 1;
+                if (aVal > bVal) return ui.sortDirection === "asc" ? 1 : -1;
+                return 0;
+            });
+        }
+        return filtered;
+    }
+
+    // Получить уникальные значения для фильтра по столбцу
+    function getUniqueValues(tableData, column) {
+        const vals = new Set();
+        tableData.forEach(row => {
+            if (row[column] !== undefined && row[column] !== "") vals.add(String(row[column]));
+        });
+        return Array.from(vals).sort();
+    }
+
+    // Открыть модальное окно выбора из справочника
+    function openReferenceModal(columnName, rowIndex, currentValue, onSelect) {
+        const mainTable = state.tables["Главная таблица"];
+        const refConfig = mainTable.referenceColumns[columnName];
+        const refTableName = refConfig.refTable;
+        const refTable = state.tables[refTableName];
+        const fieldName = refConfig.refField;
+        
+        const modalDiv = document.createElement('div');
+        modalDiv.className = 'modal-overlay';
+        let tableRows = '';
+        refTable.data.forEach((item, idx) => {
+            const val = item[fieldName];
+            tableRows += `<tr data-value="${escapeHtml(val)}"><td>${escapeHtml(val)}</td>`;
+            // показать остальные колонки для удобства
+            refTable.columns.forEach(col => {
+                if (col !== fieldName) tableRows += `<td style="color:#64748b;">${escapeHtml(String(item[col] || ''))}</td>`;
+            });
+            tableRows += `</tr>`;
+        });
+        
+        modalDiv.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span>📋 Выбор из: ${refTableName}</span>
+                    <button class="close-modal" style="background:none; border:none; font-size:24px; cursor:pointer;">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 16px; display:flex; gap:8px;">
+                        <input type="text" id="modalNewValue" placeholder="➕ Новое значение..." style="flex:1; padding:8px; border-radius:12px; border:1px solid #cbd5e1;">
+                        <button id="modalAddBtn" class="btn-small">Добавить и выбрать</button>
+                    </div>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <table class="modal-table">
+                            <thead><tr><th>${escapeHtml(fieldName)}</th>${refTable.columns.filter(c => c !== fieldName).map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+                            <tbody>${tableRows || '<tr><td>Нет данных</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modalDiv);
+        
+        modalDiv.querySelector('.close-modal').onclick = () => modalDiv.remove();
+        modalDiv.onclick = (e) => { if (e.target === modalDiv) modalDiv.remove(); };
+        
+        modalDiv.querySelectorAll('.modal-table tbody tr').forEach(tr => {
+            tr.onclick = () => {
+                const selectedValue = tr.dataset.value;
+                if (selectedValue) { onSelect(selectedValue); modalDiv.remove(); }
+            };
+        });
+        
+        const addBtn = modalDiv.querySelector('#modalAddBtn');
+        const newInput = modalDiv.querySelector('#modalNewValue');
+        addBtn.onclick = () => {
+            const newVal = newInput.value.trim();
+            if (newVal) {
+                addToReference(columnName, newVal);
+                onSelect(newVal);
+                modalDiv.remove();
+                showToast(`➕ "${newVal}" добавлено`, 1200);
+            }
+        };
+        newInput.onkeypress = (e) => { if (e.key === 'Enter') addBtn.onclick(); };
+    }
+
+    // Создание inline редактора для ссылочной ячейки
+    function createReferenceEditor(cellElement, rowIndex, columnName, currentValue) {
+        const suggestions = getReferenceValues(columnName);
+        const uniqueSugg = [...new Set(suggestions)];
+        const container = document.createElement('div');
+        container.className = 'cell-editor';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentValue || '';
+        input.placeholder = 'Введите или выберите...';
+        input.className = 'autocomplete-input';
+        const tableBtn = document.createElement('button');
+        tableBtn.innerHTML = '📋';
+        tableBtn.className = 'table-icon-btn';
+        container.appendChild(input);
+        container.appendChild(tableBtn);
+        
+        let autocompleteList = null;
+        function showAutocomplete(filterText) {
+            if (autocompleteList) autocompleteList.remove();
+            const filtered = uniqueSugg.filter(s => s.toLowerCase().includes(filterText.toLowerCase()));
+            if (filtered.length === 0) return;
+            const rect = input.getBoundingClientRect();
+            autocompleteList = document.createElement('div');
+            autocompleteList.className = 'autocomplete-list';
+            autocompleteList.style.position = 'absolute';
+            autocompleteList.style.top = `${rect.bottom + window.scrollY}px`;
+            autocompleteList.style.left = `${rect.left + window.scrollX}px`;
+            autocompleteList.style.width = `${rect.width}px`;
+            filtered.forEach(sugg => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.textContent = sugg;
+                item.onclick = () => {
+                    input.value = sugg;
+                    updateMainCell(rowIndex, columnName, sugg);
+                    if (autocompleteList) autocompleteList.remove();
+                    autocompleteList = null;
+                };
+                autocompleteList.appendChild(item);
+            });
+            document.body.appendChild(autocompleteList);
+        }
+        function hideAutocomplete() { if (autocompleteList) { autocompleteList.remove(); autocompleteList = null; } }
+        input.addEventListener('input', (e) => { if (e.target.value.length > 0) showAutocomplete(e.target.value); else hideAutocomplete(); });
+        input.addEventListener('blur', () => { setTimeout(() => { hideAutocomplete(); const newVal = input.value; if (newVal !== currentValue) updateMainCell(rowIndex, columnName, newVal); }, 150); });
+        input.addEventListener('keypress', (e) => { if (e.key === 'Enter') { hideAutocomplete(); updateMainCell(rowIndex, columnName, input.value); input.blur(); } });
+        tableBtn.onclick = (e) => { e.stopPropagation(); hideAutocomplete(); openReferenceModal(columnName, rowIndex, input.value, (selected) => { input.value = selected; updateMainCell(rowIndex, columnName, selected); }); };
+        cellElement.innerHTML = '';
+        cellElement.appendChild(container);
+        input.focus();
+        input.select();
+    }
+
+    // Основной рендер таблицы с UI панелью
+    function renderCurrentTable() {
+        const container = document.getElementById('main-content');
+        const tableName = state.currentTableName;
+        const table = state.tables[tableName];
+        if (!table) { container.innerHTML = `<div>Таблица не найдена</div>`; return; }
+        
+        const isMain = (tableName === "Главная таблица");
+        const refColumns = isMain ? table.referenceColumns : {};
+        
+        // Получаем отфильтрованные и отсортированные данные
+        const filteredData = filterAndSortData(table, state.uiState);
+        
+        // Строим фильтры по столбцам (уникальные значения из ВСЕХ данных таблицы, не только отфильтрованных)
+        const allData = table.data;
+        const columnFiltersHtml = table.columns.map(col => {
+            const uniqueVals = getUniqueValues(allData, col);
+            const currentFilter = state.uiState.columnFilters[col] || "";
+            return `<select class="filter-select" data-column="${escapeHtml(col)}">
+                        <option value="">📊 Все ${col}</option>
+                        ${uniqueVals.map(v => `<option value="${escapeHtml(v)}" ${currentFilter === v ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}
+                    </select>`;
+        }).join('');
+        
+        let html = `
+            <div class="page-title">📄 ${escapeHtml(tableName)}</div>
+            <div class="toolbar">
+                <div class="search-box">
+                    <span>🔍</span>
+                    <input type="text" id="globalSearch" placeholder="Поиск по всем полям..." value="${escapeHtml(state.uiState.searchQuery)}">
+                </div>
+                <div class="filter-group">
+                    ${columnFiltersHtml}
+                    <button id="clearFiltersBtn" class="clear-filters">✖ Сбросить</button>
+                </div>
+            </div>
+            <div class="data-table-wrapper">
+                <table>
+                    <thead>
+                        <tr>`;
+        table.columns.forEach(col => {
+            const sortIndicator = state.uiState.sortColumn === col ? (state.uiState.sortDirection === "asc" ? "▲" : "▼") : "⇅";
+            html += `<th data-column="${escapeHtml(col)}">${escapeHtml(col)} <span class="sort-icon">${sortIndicator}</span></th>`;
+        });
+        html += `<th style="width:60px;"></th></tr></thead><tbody>`;
+        
+        for (let i = 0; i < filteredData.length; i++) {
+            const row = filteredData[i];
+            const originalIndex = table.data.findIndex(r => JSON.stringify(r) === JSON.stringify(row)); // поиск индекса в исходных данных
+            const realIndex = originalIndex !== -1 ? originalIndex : i;
+            html += `<tr data-row-idx="${realIndex}">`;
+            for (let col of table.columns) {
+                const cellValue = row[col] !== undefined ? row[col] : "";
+                const isReferenceCell = isMain && refColumns[col];
+                if (isReferenceCell) {
+                    html += `<td class="reference-cell" data-col="${escapeHtml(col)}" data-row="${realIndex}" data-value="${escapeHtml(String(cellValue))}" style="cursor:pointer; background:#fffef7;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span>${escapeHtml(String(cellValue)) || '<span style="color:#94a3b8;">[выбрать]</span>'}</span>
+                                    <span style="color:#2563eb; font-size:12px;">📋</span>
+                                </div>
+                             </td>`;
+                } else {
+                    html += `<td class="normal-cell" data-col="${escapeHtml(col)}" data-row="${realIndex}" data-table="${tableName}">
+                                <input type="text" value="${escapeHtml(String(cellValue))}" class="normal-input" style="width:100%;">
+                             </td>`;
+                }
+            }
+            html += `<td><button class="btn-small delete-row-btn" data-table="${tableName}" data-row="${realIndex}">🗑️</button></td>`;
+            html += `</tr>`;
+        }
+        if (filteredData.length === 0) html += `<tr><td colspan="${table.columns.length+1}" style="text-align:center; padding:40px;">Нет данных</td></tr>`;
+        html += `</tbody></table></div>`;
+        html += `<div style="margin-top: 16px;"><button id="addRowBtn" class="btn-small" style="background:#e9e9ef; padding:8px 18px;">➕ Добавить строку</button></div>`;
+        html += `<div class="info-note">📌 Отображается ${filteredData.length} из ${table.data.length} записей. Сортировка: клик по заголовку. Фильтр: выберите значение.</div>`;
+        container.innerHTML = html;
+        
+        // Обработчики
+        document.getElementById('globalSearch')?.addEventListener('input', (e) => {
+            state.uiState.searchQuery = e.target.value;
+            renderCurrentTable();
+        });
+        document.querySelectorAll('.filter-select').forEach(select => {
+            select.addEventListener('change', (e) => {
+                const column = select.dataset.column;
+                const value = select.value;
+                if (value === "") delete state.uiState.columnFilters[column];
+                else state.uiState.columnFilters[column] = value;
+                renderCurrentTable();
+            });
+        });
+        document.getElementById('clearFiltersBtn')?.addEventListener('click', () => {
+            state.uiState.columnFilters = {};
+            state.uiState.searchQuery = "";
+            renderCurrentTable();
+        });
+        document.querySelectorAll('th[data-column]').forEach(th => {
+            th.addEventListener('click', () => {
+                const column = th.dataset.column;
+                if (state.uiState.sortColumn === column) {
+                    state.uiState.sortDirection = state.uiState.sortDirection === "asc" ? "desc" : "asc";
+                } else {
+                    state.uiState.sortColumn = column;
+                    state.uiState.sortDirection = "asc";
+                }
+                renderCurrentTable();
+            });
+        });
+        // Обычные ячейки
+        document.querySelectorAll('.normal-cell input').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const td = input.closest('.normal-cell');
+                const col = td.dataset.col;
+                const row = parseInt(td.dataset.row);
+                const tbl = td.dataset.table;
+                updateAnyTableCell(tbl, row, col, input.value);
+            });
+        });
+        // Ссылочные ячейки
+        document.querySelectorAll('.reference-cell').forEach(cell => {
+            cell.addEventListener('click', (e) => {
+                const col = cell.dataset.col;
+                const row = parseInt(cell.dataset.row);
+                const currentVal = cell.dataset.value || "";
+                createReferenceEditor(cell, row, col, currentVal);
+            });
+        });
+        // Удаление
+        document.querySelectorAll('.delete-row-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tbl = btn.dataset.table;
+                const row = parseInt(btn.dataset.row);
+                deleteRowFromTable(tbl, row);
+            });
+        });
+        document.getElementById('addRowBtn')?.addEventListener('click', () => addRowToTable(tableName));
+    }
+    
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+    
+    function renderSidebar() {
+        const container = document.getElementById('table-list-container');
+        container.innerHTML = '';
+        Object.keys(state.tables).forEach(tName => {
+            const div = document.createElement('div');
+            div.className = `table-item ${state.currentTableName === tName ? 'active' : ''}`;
+            div.innerHTML = `<span>${tName === "Главная таблица" ? "📌" : (tName === "Товары" ? "📦" : (tName === "Категории" ? "🏷️" : "📄"))}</span><span>${escapeHtml(tName)}</span>`;
+            div.onclick = () => {
+                if (state.currentTableName !== tName) {
+                    state.currentTableName = tName;
+                    state.uiState = { searchQuery: "", columnFilters: {}, sortColumn: null, sortDirection: "asc" };
+                    renderSidebar();
+                    renderCurrentTable();
+                }
+            };
+            container.appendChild(div);
+        });
+    }
+    
+    function init() {
+        // Синхронизация начальных данных
+        const mainData = state.tables["Главная таблица"].data;
+        for (let row of mainData) {
+            if (row["Товар"]) addToReference("Товар", row["Товар"]);
+            if (row["Категория"]) addToReference("Категория", row["Категория"]);
+        }
+        renderSidebar();
+        renderCurrentTable();
+    }
+    init();
+</script>
+</body>
+</html>
