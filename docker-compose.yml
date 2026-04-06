@@ -5,4 +5,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:80"
+    # Нужно, чтобы nginx мог достучаться до бэкенда на хосте (порт 8080) по host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

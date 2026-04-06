@@ -1,44 +1,78 @@
-const BASE = "";
+/** Пусто = относительный URL (тот же хост; nginx должен проксировать /api на Spring). Иначе полный URL бэкенда, например http://api.example.com:8080 */
+const RAW_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+const BASE = RAW_BASE ? RAW_BASE.replace(/\/$/, "") : "";
 
-async function parseError(res: Response): Promise<string> {
-  const t = await res.text();
+function looksLikeHtml(t: string): boolean {
+  const s = t.trimStart();
+  return s.startsWith("<!") || s.startsWith("<html");
+}
+
+async function readBodyAsText(res: Response): Promise<string> {
+  return res.text();
+}
+
+async function parseErrorMessage(res: Response, text: string): Promise<string> {
+  if (looksLikeHtml(text)) {
+    return `${res.status} ${res.statusText}: получен HTML вместо JSON. Настройте прокси location /api в nginx на контейнер Spring или задайте VITE_API_BASE_URL при сборке фронта.`;
+  }
   try {
-    const j = JSON.parse(t) as { message?: string };
-    return j.message ?? (t || res.statusText);
+    const j = JSON.parse(text) as { message?: string };
+    return j.message ?? (text || res.statusText);
   } catch {
-    return t || res.statusText;
+    return text || res.statusText;
+  }
+}
+
+async function parseJsonBody<T>(res: Response, text: string): Promise<T> {
+  if (looksLikeHtml(text)) {
+    throw new Error(
+      "Сервер вернул HTML (часто это index.html SPA), а не JSON. Убедитесь, что запросы /api проксируются на бэкенд (nginx) или задайте VITE_API_BASE_URL на URL Spring Boot."
+    );
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error("Ответ сервера не является корректным JSON.");
   }
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(await parseError(res));
-  return res.json() as Promise<T>;
+  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const res = await fetch(url);
+  const text = await readBodyAsText(res);
+  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  return parseJsonBody<T>(res, text);
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseError(res));
-  return res.json() as Promise<T>;
+  const text = await readBodyAsText(res);
+  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  return parseJsonBody<T>(res, text);
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseError(res));
-  return res.json() as Promise<T>;
+  const text = await readBodyAsText(res);
+  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  return parseJsonBody<T>(res, text);
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(await parseError(res));
+  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const res = await fetch(url, { method: "DELETE" });
+  const text = await readBodyAsText(res);
+  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
 }
 
 export function getNestedId(obj: unknown, idField: string): number | undefined {
