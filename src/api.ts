@@ -92,6 +92,9 @@ function strOrEmpty(v: unknown): string {
   return String(v);
 }
 
+/** Сброс связи на бэкенде: Long null не отличить от «поле не передано», поэтому отправляем -1 */
+export const FK_CLEAR = -1;
+
 function fk(
   patch: Record<string, unknown>,
   key: string,
@@ -100,10 +103,71 @@ function fk(
 ): number | undefined {
   if (Object.prototype.hasOwnProperty.call(patch, key)) {
     const v = patch[key];
-    if (v === null || v === undefined || v === "") return undefined;
-    return Number(v);
+    if (v === null || v === undefined || v === "") return FK_CLEAR;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return FK_CLEAR;
+    if (n < 0) return FK_CLEAR;
+    return n;
   }
-  return getNestedId(entity, nestedKey);
+  const cur = getNestedId(entity, nestedKey);
+  return cur;
+}
+
+function optStr(
+  patch: Record<string, unknown>,
+  o: Record<string, unknown>,
+  key: string
+): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(patch, key)) {
+    return strOrEmpty(patch[key]);
+  }
+  const v = strOrEmpty(o[key]);
+  return v === "" ? undefined : v;
+}
+
+/** Площади: пустое поле → 0 (в сущности float) */
+function pFloat(
+  patch: Record<string, unknown>,
+  o: Record<string, unknown>,
+  key: string
+): number | undefined {
+  if (Object.prototype.hasOwnProperty.call(patch, key)) {
+    const v = patch[key];
+    if (v === null || v === undefined || v === "") return 0;
+    const n = parseFloat(String(v).replace(",", "."));
+    return Number.isFinite(n) ? n : 0;
+  }
+  return numOrUndef(o[key]);
+}
+
+/** Год и т.п.: пустое поле → 0 (в сущности int) */
+function startUseFromPatchOrRow(
+  patch: Record<string, unknown>,
+  o: Record<string, unknown>
+): number | undefined {
+  if (Object.prototype.hasOwnProperty.call(patch, "start_use")) {
+    const v = patch.start_use;
+    if (v === null || v === undefined || v === "") return 0;
+    const n = parseInt(String(v), 10);
+    return Number.isNaN(n) ? 0 : n;
+  }
+  if (o.start_use === null || o.start_use === undefined) return undefined;
+  return Number(o.start_use);
+}
+
+function dateFromPatchOrRow(
+  patch: Record<string, unknown>,
+  o: Record<string, unknown>,
+  key: string
+): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(patch, key)) {
+    const v = patch[key];
+    if (v === null || v === undefined || v === "") return undefined;
+    return String(v).slice(0, 10);
+  }
+  const v = o[key];
+  if (v === null || v === undefined || v === "") return undefined;
+  return String(v).slice(0, 10);
 }
 
 /** Полное тело ObjectPlaceTrashRequest из сущности API (snake_case) + точечные правки */
@@ -111,11 +175,13 @@ export function objectPlaceTrashToRequest(
   o: Record<string, unknown>,
   patch: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  const dateRegister = patch.date_register ?? o.date_register;
+  const dateRegisterVal = Object.prototype.hasOwnProperty.call(patch, "date_register")
+    ? patch.date_register
+    : o.date_register;
   const dateStr =
-    dateRegister === null || dateRegister === undefined || dateRegister === ""
+    dateRegisterVal === null || dateRegisterVal === undefined || dateRegisterVal === ""
       ? undefined
-      : String(dateRegister).slice(0, 10);
+      : String(dateRegisterVal).slice(0, 10);
 
   return {
     idRegistration: strOrEmpty(patch.id_registration ?? o.id_registration),
@@ -133,16 +199,11 @@ export function objectPlaceTrashToRequest(
     ),
     nameObj: strOrEmpty(patch.name_obj ?? o.name_obj),
     nameOwn: strOrEmpty(patch.name_own ?? o.name_own),
-    startUse:
-      patch.start_use !== undefined
-        ? numOrUndef(patch.start_use)
-        : o.start_use === null || o.start_use === undefined
-          ? undefined
-          : Number(o.start_use),
-    serviseLife: strOrEmpty(patch.servise_life ?? o.servise_life) || undefined,
-    companyLocated: strOrEmpty(patch.company_located ?? o.company_located) || undefined,
-    placeObj: strOrEmpty(patch.place_obj ?? o.place_obj) || undefined,
-    project: strOrEmpty(patch.project ?? o.project) || undefined,
+    startUse: startUseFromPatchOrRow(patch, o),
+    serviseLife: optStr(patch, o, "servise_life"),
+    companyLocated: optStr(patch, o, "company_located"),
+    placeObj: optStr(patch, o, "place_obj"),
+    project: optStr(patch, o, "project"),
     stateExpertize:
       patch.state_expertize !== undefined
         ? patch.state_expertize === null
@@ -151,8 +212,8 @@ export function objectPlaceTrashToRequest(
         : o.state_expertize === null || o.state_expertize === undefined
           ? undefined
           : Boolean(o.state_expertize),
-    ecoPasport: strOrEmpty(patch.eco_pasport ?? o.eco_pasport) || undefined,
-    pravaPlace: strOrEmpty(patch.prava_place ?? o.prava_place) || undefined,
+    ecoPasport: optStr(patch, o, "eco_pasport"),
+    pravaPlace: optStr(patch, o, "prava_place"),
     confirmationUse:
       patch.confirmation_use !== undefined
         ? patch.confirmation_use === null
@@ -161,22 +222,17 @@ export function objectPlaceTrashToRequest(
         : o.confirmation_use === null || o.confirmation_use === undefined
           ? undefined
           : Boolean(o.confirmation_use),
-    square: numOrUndef(patch.square ?? o.square),
-    useSquare: numOrUndef(patch.use_square ?? o.use_square),
-    trashSquare: numOrUndef(patch.trash_square ?? o.trash_square),
-    projectPower: strOrEmpty(patch.project_power ?? o.project_power) || undefined,
-    facticheskayPower: strOrEmpty(patch.facticheskay_power ?? o.facticheskay_power) || undefined,
-    accomulatedTrash: strOrEmpty(patch.accomulated_trash ?? o.accomulated_trash) || undefined,
-    typeGrounds: strOrEmpty(patch.type_grounds ?? o.type_grounds) || undefined,
-    anderWater: strOrEmpty(patch.ander_water ?? o.ander_water) || undefined,
-    observationHole: strOrEmpty(patch.observation_hole ?? o.observation_hole) || undefined,
-    dateAxclute:
-      (patch.date_axclute ?? o.date_axclute) === null ||
-      (patch.date_axclute ?? o.date_axclute) === undefined ||
-      (patch.date_axclute ?? o.date_axclute) === ""
-        ? undefined
-        : String(patch.date_axclute ?? o.date_axclute).slice(0, 10),
-    resonAxclute: strOrEmpty(patch.reson_axclute ?? o.reson_axclute) || undefined,
+    square: pFloat(patch, o, "square"),
+    useSquare: pFloat(patch, o, "use_square"),
+    trashSquare: pFloat(patch, o, "trash_square"),
+    projectPower: optStr(patch, o, "project_power"),
+    facticheskayPower: optStr(patch, o, "facticheskay_power"),
+    accomulatedTrash: optStr(patch, o, "accomulated_trash"),
+    typeGrounds: optStr(patch, o, "type_grounds"),
+    anderWater: optStr(patch, o, "ander_water"),
+    observationHole: optStr(patch, o, "observation_hole"),
+    dateAxclute: dateFromPatchOrRow(patch, o, "date_axclute"),
+    resonAxclute: optStr(patch, o, "reson_axclute"),
     status:
       patch.status !== undefined
         ? patch.status === null

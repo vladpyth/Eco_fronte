@@ -34,7 +34,6 @@ export type GridSectionDef = {
   idField: string;
   title: string;
   sidebar: string;
-  icon: string;
   columns: SimpleCol[];
   toRequest: (row: Record<string, unknown>) => Record<string, unknown>;
   createDefault: () => Promise<Record<string, unknown>>;
@@ -66,7 +65,6 @@ export function gridCellValue(row: Record<string, unknown>, col: SimpleCol): str
 export const OBJECT_SECTION = {
   title: "Объекты размещения отходов (ObjectPlaceTrash)",
   sidebar: "Объекты",
-  icon: "📌",
 } as const;
 
 export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
@@ -75,7 +73,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_around_build",
     title: "Здания вокруг объекта (AroundBuild)",
     sidebar: "Окр. здания",
-    icon: "🏠",
     columns: [{ key: "name", label: "Название", type: "text" }],
     toRequest: (row) => ({ name: S(row.name) }),
     createDefault: async () => ({ name: "Новое здание" }),
@@ -85,7 +82,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_natual_save_build",
     title: "Здания природоохранного назначения (NatualSaveBuilding)",
     sidebar: "Природоохр. здания",
-    icon: "🌿",
     columns: [{ key: "name", label: "Название", type: "text" }],
     toRequest: (row) => ({ name: S(row.name) }),
     createDefault: async () => ({ name: "Новое здание" }),
@@ -95,7 +91,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_class_danger",
     title: "Классы опасности (ClassDanger)",
     sidebar: "Класс опасности",
-    icon: "☣️",
     columns: [{ key: "class_danger", label: "Класс (число)", type: "number" }],
     toRequest: (row) => ({ classDanger: Number(row.class_danger ?? 0) }),
     createDefault: async () => ({ classDanger: 1 }),
@@ -105,7 +100,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_type_trash1",
     title: "Типы отходов (TypeTrash1)",
     sidebar: "Типы отходов",
-    icon: "♻️",
     columns: [{ key: "name_type_trash1", label: "Название типа", type: "text" }],
     toRequest: (row) => ({ nameTypeTrash1: S(row.name_type_trash1) }),
     createDefault: async () => ({ nameTypeTrash1: "Новый тип" }),
@@ -115,7 +109,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_level_trash",
     title: "Уровни отходов (LevelTrash)",
     sidebar: "Уровни отходов",
-    icon: "📶",
     columns: [{ key: "name_level_trash", label: "Название уровня", type: "text" }],
     toRequest: (row) => ({ nameLevelTrash: S(row.name_level_trash) }),
     createDefault: async () => ({ nameLevelTrash: "Новый уровень" }),
@@ -125,7 +118,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_mame_group",
     title: "Наименования групп отходов (NameGroup)",
     sidebar: "Группы отходов",
-    icon: "📛",
     columns: [{ key: "name_group", label: "Название группы", type: "text" }],
     toRequest: (row) => ({ nameGroup: S(row.name_group) }),
     createDefault: async () => ({ nameGroup: "Новая группа" }),
@@ -135,7 +127,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_state",
     title: "Физическое состояние (PhysicalState)",
     sidebar: "Физ. состояние",
-    icon: "🧱",
     columns: [{ key: "state", label: "Состояние", type: "text" }],
     toRequest: (row) => ({ state: S(row.state) }),
     createDefault: async () => ({ state: "твёрдое" }),
@@ -145,7 +136,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_region",
     title: "Регионы (Region)",
     sidebar: "Регионы",
-    icon: "🗺️",
     columns: [{ key: "name_region", label: "Название региона", type: "text" }],
     toRequest: (row) => ({ nameRegion: S(row.name_region) }),
     createDefault: async () => ({ nameRegion: "Новый регион" }),
@@ -155,7 +145,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_cities",
     title: "Города (Cities)",
     sidebar: "Города",
-    icon: "🏙️",
     columns: [
       { key: "index", label: "Индекс", type: "text" },
       { key: "district", label: "Район", type: "text" },
@@ -196,7 +185,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_group_place_save",
     title: "Группы мест сохранения (GroupPlaceSave)",
     sidebar: "Группы мест",
-    icon: "📦",
     columns: [{ key: "name_region", label: "Название", type: "text" }],
     toRequest: (row) => ({ nameRegion: S(row.name_region) }),
     createDefault: async () => ({ nameRegion: "Новая группа" }),
@@ -206,7 +194,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_storage_scheme",
     title: "Схемы хранения (StorageScheme)",
     sidebar: "Схемы хранения",
-    icon: "🏗️",
     columns: [{ key: "name_storage_scheme", label: "Название схемы", type: "text" }],
     toRequest: (row) => ({ nameStorageScheme: S(row.name_storage_scheme) }),
     createDefault: async () => ({ nameStorageScheme: "Новая схема" }),
@@ -216,7 +203,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_gruops_degree",
     title: "Степени групп (GruopsDegree)",
     sidebar: "Степени групп",
-    icon: "🔢",
     columns: [{ key: "namber_gruop", label: "Номер группы", type: "number" }],
     toRequest: (row) => ({ namberGruop: Number(row.namber_gruop ?? 0) }),
     createDefault: async () => ({ namberGruop: 1 }),
@@ -226,7 +212,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_comments_of_place",
     title: "Комментарии к объектам (CommentsOfPlace)",
     sidebar: "Комментарии",
-    icon: "💬",
     columns: [{ key: "comments", label: "Текст", type: "text" }],
     toRequest: (row) => ({ comments: S(row.comments) }),
     createDefault: async () => ({ comments: "Новый комментарий" }),
@@ -236,7 +221,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_magazin_trash",
     title: "Справочник отходов (MagazinTrash)",
     sidebar: "Отходы (магазин)",
-    icon: "🗑️",
     columns: [
       {
         key: "__cd",
@@ -311,7 +295,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_characteristic_trash",
     title: "Характеристики отходов на объекте (CharacteristicTrash)",
     sidebar: "Характеристики отходов",
-    icon: "📊",
     columns: [
       {
         key: "__obj",
@@ -364,7 +347,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_cleaner_build",
     title: "Очистные сооружения (CleanerBuilds)",
     sidebar: "Очистные",
-    icon: "🛠️",
     columns: [
       { key: "registr_number", label: "Рег. номер", type: "text" },
       {
@@ -404,7 +386,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_phone_number",
     title: "Телефоны (NumberPhone)",
     sidebar: "Телефоны",
-    icon: "📞",
     columns: [
       { key: "number", label: "Номер", type: "text" },
       { key: "id_object_place_trash", label: "ID объекта размещения", type: "number" },
