@@ -429,13 +429,20 @@ type ObjectRelationKind = "around" | "natural";
 
 function RelationModal(props: {
   title: string;
-  rows: Record<string, unknown>[];
+  linkedRows: Record<string, unknown>[];
+  allRows: Record<string, unknown>[];
   itemIdKey: string;
   onClose: () => void;
   onAdd: (name: string) => Promise<void>;
   onDelete: (itemId: number) => Promise<void>;
+  onLinkExisting: (itemId: number) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
+  const linkedIds = new Set(
+    props.linkedRows
+      .map((it) => it[props.itemIdKey])
+      .filter((id): id is number => typeof id === "number")
+  );
   return (
     <div className="modal-overlay" role="presentation" onClick={props.onClose}>
       <div
@@ -498,30 +505,45 @@ function RelationModal(props: {
             <thead>
               <tr>
                 <th>Название</th>
-                <th style={{ width: 88 }} />
+                <th style={{ width: 120 }}>Статус</th>
+                <th style={{ width: 100 }} />
               </tr>
             </thead>
             <tbody>
-              {props.rows.length === 0 ? (
+              {props.allRows.length === 0 ? (
                 <tr>
-                  <td colSpan={2} style={{ color: "#71717a" }}>
+                  <td colSpan={3} style={{ color: "#71717a" }}>
                     Нет данных
                   </td>
                 </tr>
               ) : (
-                props.rows.map((it) => {
+                props.allRows.map((it) => {
                   const id = it[props.itemIdKey];
+                  const linked = typeof id === "number" && linkedIds.has(id);
                   return (
                     <tr key={str(id)}>
                       <td>{str(it.name)}</td>
+                      <td style={{ color: linked ? "#15803d" : "#71717a" }}>
+                        {linked ? "Связано" : "Не связано"}
+                      </td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn-small"
-                          onClick={() => typeof id === "number" && void props.onDelete(id)}
-                        >
-                          Удалить
-                        </button>
+                        {linked ? (
+                          <button
+                            type="button"
+                            className="btn-small"
+                            onClick={() => typeof id === "number" && void props.onDelete(id)}
+                          >
+                            Удалить
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-small"
+                            onClick={() => typeof id === "number" && void props.onLinkExisting(id)}
+                          >
+                            Добавить
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -826,6 +848,8 @@ export default function App() {
     kind: ObjectRelationKind;
     rowIndex: number;
   } | null>(null);
+  const [allAroundBuilds, setAllAroundBuilds] = useState<Record<string, unknown>[]>([]);
+  const [allNaturalBuilds, setAllNaturalBuilds] = useState<Record<string, unknown>[]>([]);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -845,6 +869,19 @@ export default function App() {
       ]);
       setRefCache({ cities, group, storage, degree, comments });
       setRegionsList(regions);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const loadGlobalRelationLists = useCallback(async () => {
+    try {
+      const [around, natural] = await Promise.all([
+        apiGet<Record<string, unknown>[]>("/api/around-build"),
+        apiGet<Record<string, unknown>[]>("/api/natual-save-building"),
+      ]);
+      setAllAroundBuilds(around);
+      setAllNaturalBuilds(natural);
     } catch {
       /* ignore */
     }
@@ -871,6 +908,10 @@ export default function App() {
   useEffect(() => {
     void loadRefs();
   }, [loadRefs]);
+
+  useEffect(() => {
+    void loadGlobalRelationLists();
+  }, [loadGlobalRelationLists]);
 
   const objectColumnKeys = useMemo(() => OBJECT_COLUMNS.map((c) => c.key), []);
 
@@ -980,11 +1021,8 @@ export default function App() {
   const relationKeyInRow = (kind: ObjectRelationKind) =>
     kind === "around" ? "aroundBuilds" : "naturalSaveBuildings";
 
-  const loadObjectRelation = useCallback(
-    async (rowIndex: number, kind: ObjectRelationKind) => {
-      const row = rows[rowIndex];
-      if (!row || typeof row.id_object_place_trash !== "number") return;
-      const objectId = row.id_object_place_trash;
+  const loadObjectRelationByObjectId = useCallback(
+    async (objectId: number, kind: ObjectRelationKind) => {
       try {
         const list = await apiGet<Record<string, unknown>[]>(relationPath(kind, objectId));
         const rowKey = relationKeyInRow(kind);
@@ -999,8 +1037,35 @@ export default function App() {
         /* ignore */
       }
     },
-    [rows]
+    []
   );
+
+  const loadObjectRelation = useCallback(
+    async (rowIndex: number, kind: ObjectRelationKind) => {
+      const row = rows[rowIndex];
+      if (!row || typeof row.id_object_place_trash !== "number") return;
+      await loadObjectRelationByObjectId(row.id_object_place_trash, kind);
+    },
+    [loadObjectRelationByObjectId, rows]
+  );
+
+  useEffect(() => {
+    if (section !== "objects" || rows.length === 0) return;
+    const needLoad = rows
+      .filter(
+        (r) =>
+          typeof r.id_object_place_trash === "number" &&
+          (r.aroundBuilds === undefined || r.naturalSaveBuildings === undefined)
+      )
+      .slice(0, 30);
+    if (needLoad.length === 0) return;
+    void Promise.all(
+      needLoad.flatMap((r) => [
+        loadObjectRelationByObjectId(r.id_object_place_trash as number, "around"),
+        loadObjectRelationByObjectId(r.id_object_place_trash as number, "natural"),
+      ])
+    );
+  }, [loadObjectRelationByObjectId, rows, section]);
 
   const addObjectRelation = useCallback(
     async (rowIndex: number, kind: ObjectRelationKind, name: string) => {
@@ -1009,13 +1074,14 @@ export default function App() {
       const objectId = row.id_object_place_trash;
       try {
         await apiPost(relationPath(kind, objectId), { name });
-        await loadObjectRelation(rowIndex, kind);
+        await loadObjectRelationByObjectId(objectId, kind);
+        await loadGlobalRelationLists();
         showToast("Добавлено");
       } catch (e) {
         showToast(e instanceof Error ? e.message : "Ошибка");
       }
     },
-    [loadObjectRelation, rows, showToast]
+    [loadGlobalRelationLists, loadObjectRelationByObjectId, rows, showToast]
   );
 
   const deleteObjectRelation = useCallback(
@@ -1025,13 +1091,33 @@ export default function App() {
       const objectId = row.id_object_place_trash;
       try {
         await apiDelete(`${relationPath(kind, objectId)}/${itemId}`);
-        await loadObjectRelation(rowIndex, kind);
+        await loadObjectRelationByObjectId(objectId, kind);
         showToast("Удалено");
       } catch (e) {
         showToast(e instanceof Error ? e.message : "Ошибка");
       }
     },
-    [loadObjectRelation, rows, showToast]
+    [loadObjectRelationByObjectId, rows, showToast]
+  );
+
+  const linkExistingObjectRelation = useCallback(
+    async (rowIndex: number, kind: ObjectRelationKind, itemId: number) => {
+      const row = rows[rowIndex];
+      if (!row || typeof row.id_object_place_trash !== "number") return;
+      const objectId = row.id_object_place_trash;
+      try {
+        if (kind === "around") {
+          await apiPost(relationPath(kind, objectId), { aroundBuildId: itemId });
+        } else {
+          await apiPost(relationPath(kind, objectId), { natualSaveBuildId: itemId });
+        }
+        await loadObjectRelationByObjectId(objectId, kind);
+        showToast("Связь добавлена");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Ошибка");
+      }
+    },
+    [loadObjectRelationByObjectId, rows, showToast]
   );
 
   const onObjectFieldBlur = (
@@ -1605,6 +1691,7 @@ export default function App() {
                                         onClick={() => {
                                           setRelationModal({ kind, rowIndex: idx });
                                           void loadObjectRelation(idx, kind);
+                                          void loadGlobalRelationLists();
                                           setEditingRelation(null);
                                         }}
                                       >
@@ -1885,12 +1972,15 @@ export default function App() {
                 ? "Природоохранные сооружения"
                 : "Населенные пункты"
             }
-            rows={
+            linkedRows={
               (rows[relationModal.rowIndex][
                 relationModal.kind === "around"
                   ? "aroundBuilds"
                   : "naturalSaveBuildings"
               ] as Record<string, unknown>[]) ?? []
+            }
+            allRows={
+              relationModal.kind === "around" ? allAroundBuilds : allNaturalBuilds
             }
             itemIdKey={
               relationModal.kind === "around"
@@ -1903,6 +1993,13 @@ export default function App() {
             }}
             onDelete={async (itemId) => {
               await deleteObjectRelation(relationModal.rowIndex, relationModal.kind, itemId);
+            }}
+            onLinkExisting={async (itemId) => {
+              await linkExistingObjectRelation(
+                relationModal.rowIndex,
+                relationModal.kind,
+                itemId
+              );
             }}
           />
         )}
