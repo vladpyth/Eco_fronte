@@ -1,4 +1,7 @@
-import { apiGet, getNestedId } from "./api";
+import { FK_CLEAR, apiGet, getNestedId } from "./api";
+import { GRID_REF_SPECS, type GridRefKind } from "./gridRefConfig";
+
+export type { GridRefKind } from "./gridRefConfig";
 
 export type GridSectionId =
   | "around-build"
@@ -27,6 +30,8 @@ export type SimpleCol = {
   type?: "text" | "number" | "float" | "bool" | "date";
   readOnly?: boolean;
   format?: (row: Record<string, unknown>) => string;
+  /** Связь со справочником (таблица «Справочник отходов» и др.) */
+  gridRef?: GridRefKind;
 };
 
 export type GridSectionDef = {
@@ -50,16 +55,88 @@ export function pickFk(val: unknown, nestedIdField: string): number {
   return getNestedId(val, nestedIdField) ?? 0;
 }
 
-function cellStr(row: Record<string, unknown>, col: SimpleCol): string {
+/** FK MagazinTrash → ClassDanger: допускается отсутствие связи (null в API). */
+function magazinClassDangerOrNull(row: Record<string, unknown>): number | null {
+  const v = row.id_class_danger;
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  return getNestedId(v, "id_class_danger") ?? null;
+}
+
+function magazinIntField(row: Record<string, unknown>, key: string): number {
+  const n = Number(row[key] ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.trunc(n);
+}
+
+/**
+ * Тело MagazinTrash для API: jakarta @NotBlank / @Size / @NotNull.
+ * Пустые ячейки после редактирования и NaN не должны давать 400.
+ */
+function magazinTrashApiBody(row: Record<string, unknown>): Record<string, unknown> {
+  let code = S(row.code_trash).trim().slice(0, 8);
+  if (!code) {
+    const mid = row.id_magazin_trash;
+    if (typeof mid === "number" && mid > 0) {
+      code = String(mid).padStart(8, "0").slice(-8);
+    } else {
+      code = `C${Date.now() % 1e8}`.slice(0, 8);
+    }
+  }
+
+  let name = S(row.name_trash).trim().slice(0, 50);
+  if (!name) name = "Отход";
+
+  let level4 = S(row.level4).trim();
+  if (!level4) level4 = "I";
+
+  return {
+    /** null в JSON иногда режется прокси/клиентом; -1 = сброс FK (как ObjectPlaceTrash) */
+    idClassDanger: (() => {
+      const n = magazinClassDangerOrNull(row);
+      return n == null ? FK_CLEAR : n;
+    })(),
+    idTypeTrash: pickFk(row.id_type_trash, "id_type_trash1"),
+    idLevelTrash: pickFk(row.id_level_trash, "id_level_trash"),
+    idMameGroup: pickFk(row.id_mame_group, "id_mame_group"),
+    codeTrash: code,
+    nameTrash: name,
+    level1: magazinIntField(row, "level1"),
+    group2: magazinIntField(row, "group2"),
+    level3: magazinIntField(row, "level3"),
+    level4,
+  };
+}
+
+function cellStr(
+  row: Record<string, unknown>,
+  col: SimpleCol,
+  gridRefCache?: Record<GridRefKind, Record<string, unknown>[]>
+): string {
   if (col.format) return col.format(row);
+  if (col.gridRef) {
+    const spec = GRID_REF_SPECS[col.gridRef];
+    const v = row[col.key];
+    if (v && typeof v === "object") return spec.display(v as Record<string, unknown>);
+    const id = typeof v === "number" ? v : getNestedId(v, spec.idField);
+    if (id != null && gridRefCache) {
+      const found = gridRefCache[col.gridRef].find((r) => pickFk(r, spec.idField) === id);
+      if (found) return spec.display(found);
+    }
+    return id != null ? String(id) : "";
+  }
   const v = row[col.key];
   if (col.type === "bool")
     return v === true ? "Да" : v === false ? "Нет" : "";
   return S(v);
 }
 
-export function gridCellValue(row: Record<string, unknown>, col: SimpleCol): string {
-  return cellStr(row, col);
+export function gridCellValue(
+  row: Record<string, unknown>,
+  col: SimpleCol,
+  gridRefCache?: Record<GridRefKind, Record<string, unknown>[]>
+): string {
+  return cellStr(row, col, gridRefCache);
 }
 
 export const OBJECT_SECTION = {
@@ -220,64 +297,33 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     apiPath: "/api/magazin-trash",
     idField: "id_magazin_trash",
     title: "Справочник отходов (MagazinTrash)",
-    sidebar: "Отходы (магазин)",
+    sidebar: "Справочник отходов",
     columns: [
-      {
-        key: "__cd",
-        label: "Класс опасности (знач.)",
-        readOnly: true,
-        format: (row) => S((row.id_class_danger as Record<string, unknown>)?.class_danger),
-      },
-      { key: "id_class_danger", label: "ID класса опасности", type: "number" },
-      {
-        key: "__tt",
-        label: "Тип отхода",
-        readOnly: true,
-        format: (row) => S((row.id_type_trash as Record<string, unknown>)?.name_type_trash1),
-      },
-      { key: "id_type_trash", label: "ID типа отхода (TypeTrash1)", type: "number" },
-      {
-        key: "__lv",
-        label: "Уровень",
-        readOnly: true,
-        format: (row) => S((row.id_level_trash as Record<string, unknown>)?.name_level_trash),
-      },
-      { key: "id_level_trash", label: "ID уровня", type: "number" },
-      {
-        key: "__ng",
-        label: "Группа наименований",
-        readOnly: true,
-        format: (row) => S((row.id_mame_group as Record<string, unknown>)?.name_group),
-      },
-      { key: "id_mame_group", label: "ID группы", type: "number" },
-      { key: "code_trash", label: "Код", type: "text" },
-      { key: "name_trash", label: "Наименование", type: "text" },
+      { key: "code_trash", label: "Код отхода", type: "text" },
+      { key: "name_trash", label: "Наименование отхода", type: "text" },
+      { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
+      { key: "id_type_trash", label: "Тип отхода", gridRef: "typeTrash1" },
+      { key: "id_level_trash", label: "Уровень", gridRef: "levelTrash" },
+      { key: "id_mame_group", label: "Группа наименований", gridRef: "nameGroup" },
       { key: "level1", label: "Уровень 1", type: "number" },
       { key: "group2", label: "Группа 2", type: "number" },
       { key: "level3", label: "Уровень 3", type: "number" },
       { key: "level4", label: "Уровень 4", type: "text" },
     ],
-    toRequest: (row) => ({
-      idClassDanger: pickFk(row.id_class_danger, "id_class_danger"),
-      idTypeTrash: pickFk(row.id_type_trash, "id_type_trash1"),
-      idLevelTrash: pickFk(row.id_level_trash, "id_level_trash"),
-      idMameGroup: pickFk(row.id_mame_group, "id_mame_group"),
-      codeTrash: S(row.code_trash),
-      nameTrash: S(row.name_trash),
-      level1: Number(row.level1 ?? 0),
-      group2: Number(row.group2 ?? 0),
-      level3: Number(row.level3 ?? 0),
-      level4: S(row.level4),
-    }),
+    toRequest: (row) => magazinTrashApiBody(row),
     createDefault: async () => {
-      const [cd, tt, lv, ng] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/classDanger"),
+      const [tt, lv, ng] = await Promise.all([
         apiGet<Record<string, unknown>[]>("/api/type-trash1"),
         apiGet<Record<string, unknown>[]>("/api/level-trash"),
         apiGet<Record<string, unknown>[]>("/api/name-group"),
       ]);
+      if (!tt?.length || !lv?.length || !ng?.length) {
+        throw new Error(
+          "Сначала добавьте записи в справочники: «Типы отходов», «Уровни отходов», «Группы отходов»."
+        );
+      }
       return {
-        idClassDanger: pickFk(cd[0], "id_class_danger"),
+        idClassDanger: FK_CLEAR,
         idTypeTrash: pickFk(tt[0], "id_type_trash1"),
         idLevelTrash: pickFk(lv[0], "id_level_trash"),
         idMameGroup: pickFk(ng[0], "id_mame_group"),
@@ -405,6 +451,7 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
 };
 
 export const GRID_SECTION_ORDER: GridSectionId[] = [
+  "magazin-trash",
   "around-build",
   "natual-save-building",
   "classDanger",
@@ -418,7 +465,6 @@ export const GRID_SECTION_ORDER: GridSectionId[] = [
   "storage-scheme",
   "gruops-degree",
   "comments-of-place",
-  "magazin-trash",
   "characteristic-trash",
   "cleaner-builds",
   "number-phone",

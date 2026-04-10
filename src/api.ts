@@ -16,8 +16,32 @@ async function parseErrorMessage(res: Response, text: string): Promise<string> {
     return `${res.status} ${res.statusText}: получен HTML вместо JSON. Настройте прокси location /api в nginx на контейнер Spring или задайте VITE_API_BASE_URL при сборке фронта.`;
   }
   try {
-    const j = JSON.parse(text) as { message?: string };
-    return j.message ?? (text || res.statusText);
+    const j = JSON.parse(text) as {
+      message?: string;
+      detail?: string;
+      title?: string;
+      errors?: Array<{ field?: string; defaultMessage?: string; message?: string }>;
+      violations?: Array<{ field?: string; message?: string; propertyPath?: string }>;
+    };
+    if (Array.isArray(j.errors) && j.errors.length > 0) {
+      const parts = j.errors.map((e) => {
+        const f = e.field ?? "";
+        const m = e.defaultMessage ?? e.message ?? "";
+        return f ? `${f}: ${m}` : m;
+      });
+      const joined = parts.filter(Boolean).join("; ");
+      if (joined) return joined;
+    }
+    if (Array.isArray(j.violations) && j.violations.length > 0) {
+      const parts = j.violations.map((v) => {
+        const f = v.field ?? v.propertyPath ?? "";
+        const m = v.message ?? "";
+        return f ? `${f}: ${m}` : m;
+      });
+      const joined = parts.filter(Boolean).join("; ");
+      if (joined) return joined;
+    }
+    return j.detail ?? j.message ?? j.title ?? (text || res.statusText);
   } catch {
     return text || res.statusText;
   }

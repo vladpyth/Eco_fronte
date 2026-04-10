@@ -10,11 +10,13 @@ import {
   formatDegree,
   formatGroupPlace,
   formatStorage,
+  getNestedId,
   objectPlaceTrashToRequest,
 } from "./api";
 import {
   GRID_SECTION_ORDER,
   OBJECT_SECTION,
+  type GridRefKind,
   type GridSectionId,
   type SectionId,
   type SimpleCol,
@@ -23,6 +25,7 @@ import {
   isGridSection,
   pickFk,
 } from "./sectionsConfig";
+import { GRID_REF_SPECS } from "./gridRefConfig";
 import {
   OBJECT_COLUMNS,
   type ObjectCol,
@@ -77,7 +80,13 @@ const REF_CONFIG: Record<
   {
     title: string;
     path: string;
-    patchKey: "citiesId" | "groupPlaceSaveId" | "storageSchemeId" | "gruopsDegreeId" | "commentsOfPlaceId";
+    patchKey:
+      | "citiesId"
+      | "groupPlaceSaveId"
+      | "storageSchemeId"
+      | "gruopsDegreeId"
+      | "commentsOfPlaceId"
+      | "magazinTrashId";
     display: (row: Record<string, unknown>) => string;
     primaryHeader: string;
   }
@@ -116,6 +125,14 @@ const REF_CONFIG: Record<
     patchKey: "commentsOfPlaceId",
     display: (r) => String(r.comments ?? "").slice(0, 80),
     primaryHeader: "Комментарий",
+  },
+  magazin: {
+    title: "Справочник отходов",
+    path: "/api/magazin-trash",
+    patchKey: "magazinTrashId",
+    display: (r) =>
+      `${String(r.code_trash ?? r.codeTrash ?? "").trim()} — ${String(r.name_trash ?? r.nameTrash ?? "").trim()}`.trim(),
+    primaryHeader: "Код — наименование",
   },
 };
 
@@ -198,6 +215,93 @@ function formatNameList(row: Record<string, unknown>, keyCandidates: string[]): 
     .join(", ");
 }
 
+/** ID объекта из поля CharacteristicTrash.id_object_place_trash (число или вложенный ObjectPlaceTrash). */
+function characteristicObjectPlaceId(c: Record<string, unknown>): number | undefined {
+  const v = c.id_object_place_trash ?? c.idObjectPlaceTrash;
+  if (typeof v === "number") return v;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const id = o.id_object_place_trash ?? o.idObjectPlaceTrash;
+    if (typeof id === "number") return id;
+  }
+  return undefined;
+}
+
+function magazinFromCharacteristic(c: Record<string, unknown>): Record<string, unknown> | undefined {
+  const m = c.id_magazin_trash ?? c.idMagazinTrash;
+  if (m && typeof m === "object") return m as Record<string, unknown>;
+  return undefined;
+}
+
+function characteristicTrashRowId(c: Record<string, unknown>): number | undefined {
+  const v = c.id_characteristic_trash ?? c.idCharacteristicTrash;
+  return typeof v === "number" ? v : undefined;
+}
+
+/** Тело PUT characteristic-trash: смена вида отхода (код и наименование из MagazinTrash). */
+function characteristicTrashPutBodySwapMagazin(
+  existing: Record<string, unknown>,
+  idObjectPlaceTrash: number,
+  newMagazinId: number
+): Record<string, unknown> {
+  const st = existing.id_state ?? existing.idState;
+  let stateId: number | undefined;
+  if (typeof st === "number") stateId = st;
+  else if (st && typeof st === "object") {
+    const o = st as Record<string, unknown>;
+    stateId =
+      getNestedId(st, "id_state") ??
+      (typeof o.idState === "number" ? o.idState : undefined);
+  }
+  const w = existing.weight_for_year ?? existing.weightForYear ?? 0;
+  const sq = existing.square_for_year ?? existing.squareForYear ?? 0;
+  return {
+    idObjectPlaceTrash,
+    idMagazinTrash: newMagazinId,
+    idState: stateId,
+    weightForYear: typeof w === "number" && Number.isFinite(w) ? w : 0,
+    squareForYear: typeof sq === "number" && Number.isFinite(sq) ? sq : 0,
+  };
+}
+
+/** Код и наименование отхода из CharacteristicTrash + MagazinTrash (реестр — поле register в ObjectPlaceTrash). */
+function mergeCharacteristicsIntoObjectRows(
+  rows: Record<string, unknown>[],
+  characteristics: Record<string, unknown>[]
+): Record<string, unknown>[] {
+  const byObject = new Map<number, Record<string, unknown>[]>();
+  for (const c of characteristics) {
+    const oid = characteristicObjectPlaceId(c);
+    if (oid === undefined) continue;
+    const list = byObject.get(oid) ?? [];
+    list.push(c);
+    byObject.set(oid, list);
+  }
+  return rows.map((row) => {
+    const id = row.id_object_place_trash;
+    if (typeof id !== "number") return row;
+    const chars = byObject.get(id) ?? [];
+    const codes: string[] = [];
+    const names: string[] = [];
+    for (const ch of chars) {
+      const mag = magazinFromCharacteristic(ch);
+      if (mag) {
+        const code = mag.code_trash ?? mag.codeTrash;
+        const name = mag.name_trash ?? mag.nameTrash;
+        if (code !== null && code !== undefined && String(code).trim() !== "")
+          codes.push(String(code));
+        if (name !== null && name !== undefined && String(name).trim() !== "")
+          names.push(String(name));
+      }
+    }
+    return {
+      ...row,
+      __code_trash: [...new Set(codes)].join(", "),
+      __name_trash: [...new Set(names)].join(", "),
+    };
+  });
+}
+
 function getObjectCellValue(row: Record<string, unknown>, key: string): string {
   switch (key) {
     case "__region":
@@ -270,6 +374,7 @@ function idFieldForSection(s: SectionId): string {
 }
 
 function gridInputDefault(row: Record<string, unknown>, col: SimpleCol): string {
+  if (col.gridRef) return "";
   if (col.readOnly) return "";
   const v = row[col.key];
   if (v === undefined || v === null) {
@@ -283,7 +388,7 @@ function gridInputDefault(row: Record<string, unknown>, col: SimpleCol): string 
   ) {
     return String(pickFk(v, col.key));
   }
-  return gridCellValue(row, col);
+  return gridCellValue(row, col, undefined);
 }
 
 function parseGridInput(
@@ -311,11 +416,19 @@ function parseGridInput(
 
 function PhoneModal(props: {
   row: Record<string, unknown>;
+  allPhones: Record<string, unknown>[];
   onClose: () => void;
   onRefresh: () => Promise<void>;
+  onRefreshAll: () => Promise<void>;
+  onLinkExisting: (phoneId: number, numberValue: string) => Promise<void>;
   showToast: (msg: string) => void;
 }) {
   const phones = Array.isArray(props.row.phones) ? props.row.phones : [];
+  const linkedIds = new Set(
+    phones
+      .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>).id_phone_number : null))
+      .filter((id): id is number => typeof id === "number")
+  );
   const [draft, setDraft] = useState("");
   const oid = props.row.id_object_place_trash;
 
@@ -324,6 +437,7 @@ function PhoneModal(props: {
       await apiDelete(`/api/number-phone/${id}`);
       props.showToast("Удалено");
       await props.onRefresh();
+      await props.onRefreshAll();
     } catch (e) {
       props.showToast(e instanceof Error ? e.message : "Ошибка");
     }
@@ -340,6 +454,7 @@ function PhoneModal(props: {
       setDraft("");
       props.showToast("Добавлено");
       await props.onRefresh();
+      await props.onRefreshAll();
     } catch (e) {
       props.showToast(e instanceof Error ? e.message : "Ошибка");
     }
@@ -383,7 +498,8 @@ function PhoneModal(props: {
               Добавить
             </button>
           </div>
-          <table className="modal-table">
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Номера этого объекта</div>
+          <table className="modal-table" style={{ marginBottom: 16 }}>
             <thead>
               <tr>
                 <th>Номер</th>
@@ -412,6 +528,52 @@ function PhoneModal(props: {
                         >
                           Удалить
                         </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Все занесенные номера</div>
+          <table className="modal-table">
+            <thead>
+              <tr>
+                <th>Номер</th>
+                <th style={{ width: 120 }}>Статус</th>
+                <th style={{ width: 100 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {props.allPhones.length === 0 ? (
+                <tr>
+                  <td colSpan={3} style={{ color: "#71717a" }}>
+                    Нет номеров
+                  </td>
+                </tr>
+              ) : (
+                props.allPhones.map((p) => {
+                  const rec = p as Record<string, unknown>;
+                  const id = rec.id_phone_number;
+                  const linked = typeof id === "number" && linkedIds.has(id);
+                  return (
+                    <tr key={`all-${str(id)}`}>
+                      <td>{str(rec.number)}</td>
+                      <td style={{ color: linked ? "#15803d" : "#71717a" }}>
+                        {linked ? "Связано" : "Не связано"}
+                      </td>
+                      <td>
+                        {!linked && typeof id === "number" ? (
+                          <button
+                            type="button"
+                            className="btn-small"
+                            onClick={() => void props.onLinkExisting(id, str(rec.number))}
+                          >
+                            Добавить
+                          </button>
+                        ) : (
+                          <span style={{ color: "#a1a1aa", fontSize: 12 }}>—</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -557,6 +719,106 @@ function RelationModal(props: {
   );
 }
 
+function GridReferenceModal(props: {
+  kind: GridRefKind;
+  rows: Record<string, unknown>[];
+  onClose: () => void;
+  onPick: (picked: Record<string, unknown>) => void;
+  onCreated: (created: Record<string, unknown>) => void;
+  showToast: (msg: string) => void;
+  allowClear?: boolean;
+  onClear?: () => void;
+}) {
+  const spec = GRID_REF_SPECS[props.kind];
+  const idKey = spec.idField;
+  const [draft, setDraft] = useState("");
+
+  const add = async () => {
+    try {
+      const body = spec.quickCreateFromInput(draft);
+      const created = await apiPost<Record<string, unknown>>(spec.apiPath, body);
+      props.onCreated(created);
+      props.showToast("Добавлено");
+      props.onPick(created);
+      setDraft("");
+    } catch (e) {
+      props.showToast(e instanceof Error ? e.message : "Ошибка сохранения");
+    }
+  };
+
+  return (
+    <div className="modal-overlay" role="presentation" onClick={props.onClose}>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <span>{spec.modalTitle}</span>
+          <button
+            type="button"
+            className="clear-filters"
+            style={{ background: "none", fontSize: "24px", padding: "0 8px" }}
+            onClick={props.onClose}
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          {props.allowClear && props.onClear ? (
+            <div style={{ marginBottom: 12 }}>
+              <button type="button" className="btn-small" onClick={() => props.onClear?.()}>
+                Сбросить связь
+              </button>
+            </div>
+          ) : null}
+          <div style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <input
+              className="cell-input-minimal"
+              style={{ flex: 1, minWidth: 160 }}
+              placeholder={spec.placeholder}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void add()}
+            />
+            <button type="button" className="btn-small" onClick={() => void add()}>
+              Добавить и выбрать
+            </button>
+          </div>
+          <div style={{ maxHeight: 400, overflowY: "auto" }}>
+            <table className="modal-table">
+              <thead>
+                <tr>
+                  <th>{spec.primaryHeader}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {props.rows.length === 0 ? (
+                  <tr>
+                    <td style={{ color: "#71717a" }}>Нет данных</td>
+                  </tr>
+                ) : (
+                  props.rows.map((item) => (
+                    <tr
+                      key={str(item[idKey])}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => props.onPick(item)}
+                    >
+                      <td>{spec.display(item)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReferenceModal(props: {
   kind: RefKind;
   rows: Record<string, unknown>[];
@@ -585,10 +847,13 @@ function ReferenceModal(props: {
           ? "id_storage_scheme"
           : props.kind === "degree"
             ? "id_gruops_degree"
-            : "id_comments_of_place";
+            : props.kind === "comments"
+              ? "id_comments_of_place"
+              : "id_magazin_trash";
 
   const add = async () => {
     try {
+      if (props.kind === "magazin") return;
       if (props.kind === "group") {
         const created = await apiPost<Record<string, unknown>>(cfg.path, {
           nameRegion: newVal.trim(),
@@ -669,46 +934,53 @@ function ReferenceModal(props: {
               Сбросить связь
             </button>
           </div>
-          <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-            {props.kind === "cities" ? (
-              <>
+          {props.kind !== "magazin" && (
+            <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+              {props.kind === "cities" ? (
+                <>
+                  <input
+                    className="cell-input-minimal"
+                    placeholder="Индекс"
+                    value={cityIndex}
+                    onChange={(e) => setCityIndex(e.target.value)}
+                  />
+                  <input
+                    className="cell-input-minimal"
+                    placeholder="Район"
+                    value={cityDistrict}
+                    onChange={(e) => setCityDistrict(e.target.value)}
+                  />
+                  <select
+                    className="filter-select cell-select-minimal"
+                    value={cityRegionId}
+                    onChange={(e) => setCityRegionId(Number(e.target.value))}
+                  >
+                    {props.regions.map((r) => (
+                      <option key={str(r.id_region)} value={str(r.id_region)}>
+                        {str(r.name_region)}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
                 <input
                   className="cell-input-minimal"
-                  placeholder="Индекс"
-                  value={cityIndex}
-                  onChange={(e) => setCityIndex(e.target.value)}
+                  placeholder="Новое значение..."
+                  value={newVal}
+                  onChange={(e) => setNewVal(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void add()}
                 />
-                <input
-                  className="cell-input-minimal"
-                  placeholder="Район"
-                  value={cityDistrict}
-                  onChange={(e) => setCityDistrict(e.target.value)}
-                />
-                <select
-                  className="filter-select cell-select-minimal"
-                  value={cityRegionId}
-                  onChange={(e) => setCityRegionId(Number(e.target.value))}
-                >
-                  {props.regions.map((r) => (
-                    <option key={str(r.id_region)} value={str(r.id_region)}>
-                      {str(r.name_region)}
-                    </option>
-                  ))}
-                </select>
-              </>
-            ) : (
-              <input
-                className="cell-input-minimal"
-                placeholder="Новое значение..."
-                value={newVal}
-                onChange={(e) => setNewVal(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void add()}
-              />
-            )}
-            <button type="button" className="btn-small" style={{ alignSelf: "flex-start" }} onClick={() => void add()}>
-              Добавить и выбрать
-            </button>
-          </div>
+              )}
+              <button
+                type="button"
+                className="btn-small"
+                style={{ alignSelf: "flex-start" }}
+                onClick={() => void add()}
+              >
+                Добавить и выбрать
+              </button>
+            </div>
+          )}
           <div style={{ maxHeight: 400, overflowY: "auto" }}>
             <table className="modal-table">
               <thead>
@@ -725,7 +997,7 @@ function ReferenceModal(props: {
               <tbody>
                 {props.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={3}>Нет данных</td>
+                    <td colSpan={props.kind === "cities" ? 3 : 1}>Нет данных</td>
                   </tr>
                 ) : (
                   props.rows.map((item) => (
@@ -755,6 +1027,10 @@ function ReferenceModal(props: {
 export default function App() {
   const [section, setSection] = useState<SectionId>("objects");
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  /** Для колонок кода/наименования отхода (CharacteristicTrash → MagazinTrash) */
+  const [characteristicTrashList, setCharacteristicTrashList] = useState<
+    Record<string, unknown>[]
+  >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -817,6 +1093,15 @@ export default function App() {
     storage: [],
     degree: [],
     comments: [],
+    magazin: [],
+  });
+  const [gridRefLists, setGridRefLists] = useState<
+    Record<GridRefKind, Record<string, unknown>[]>
+  >({
+    classDanger: [],
+    typeTrash1: [],
+    levelTrash: [],
+    nameGroup: [],
   });
   const [regionsList, setRegionsList] = useState<Record<string, unknown>[]>([]);
 
@@ -826,8 +1111,22 @@ export default function App() {
     colKey: string;
   } | null>(null);
 
+  const [gridRefModal, setGridRefModal] = useState<{
+    kind: GridRefKind;
+    rowIndex: number;
+    colKey: string;
+    section: GridSectionId;
+  } | null>(null);
+
   const [editingRef, setEditingRef] = useState<{
     kind: RefKind;
+    rowIndex: number;
+    colKey: string;
+    filter: string;
+  } | null>(null);
+
+  const [editingGridRef, setEditingGridRef] = useState<{
+    kind: GridRefKind;
     rowIndex: number;
     colKey: string;
     filter: string;
@@ -848,6 +1147,7 @@ export default function App() {
     kind: ObjectRelationKind;
     rowIndex: number;
   } | null>(null);
+  const [allPhones, setAllPhones] = useState<Record<string, unknown>[]>([]);
   const [allAroundBuilds, setAllAroundBuilds] = useState<Record<string, unknown>[]>([]);
   const [allNaturalBuilds, setAllNaturalBuilds] = useState<Record<string, unknown>[]>([]);
 
@@ -859,20 +1159,110 @@ export default function App() {
 
   const loadRefs = useCallback(async () => {
     try {
-      const [cities, group, storage, degree, comments, regions] = await Promise.all([
+      const [
+        cities,
+        group,
+        storage,
+        degree,
+        comments,
+        regions,
+        magazin,
+        classDanger,
+        typeTrash1,
+        levelTrash,
+        nameGroup,
+      ] = await Promise.all([
         apiGet<Record<string, unknown>[]>("/api/cities"),
         apiGet<Record<string, unknown>[]>("/api/group-place-save"),
         apiGet<Record<string, unknown>[]>("/api/storage-scheme"),
         apiGet<Record<string, unknown>[]>("/api/gruops-degree"),
         apiGet<Record<string, unknown>[]>("/api/comments-of-place"),
         apiGet<Record<string, unknown>[]>("/api/region"),
+        apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
+        apiGet<Record<string, unknown>[]>("/api/classDanger"),
+        apiGet<Record<string, unknown>[]>("/api/type-trash1"),
+        apiGet<Record<string, unknown>[]>("/api/level-trash"),
+        apiGet<Record<string, unknown>[]>("/api/name-group"),
       ]);
-      setRefCache({ cities, group, storage, degree, comments });
+      setRefCache({ cities, group, storage, degree, comments, magazin });
+      setGridRefLists({ classDanger, typeTrash1, levelTrash, nameGroup });
       setRegionsList(regions);
     } catch {
       /* ignore */
     }
   }, []);
+
+  const mergeGridRefIntoCache = useCallback(
+    (kind: GridRefKind, created: Record<string, unknown>) => {
+      setGridRefLists((prev) => ({
+        ...prev,
+        [kind]: [...prev[kind], created],
+      }));
+    },
+    []
+  );
+
+  const refreshCharacteristicTrashList = useCallback(async () => {
+    try {
+      const list = await apiGet<Record<string, unknown>[]>("/api/characteristic-trash");
+      setCharacteristicTrashList(Array.isArray(list) ? list : []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /** Выбор отхода из MagazinTrash → обновление CharacteristicTrash (код и наименование вместе). */
+  const pickMagazinForObject = useCallback(
+    async (rowIndex: number, magazinId: number) => {
+      const row = rows[rowIndex];
+      if (!row || typeof row.id_object_place_trash !== "number") return;
+      const oid = row.id_object_place_trash;
+      const chars = characteristicTrashList.filter(
+        (c) => characteristicObjectPlaceId(c) === oid
+      );
+      if (chars.length > 1) {
+        showToast(
+          "Несколько характеристик на объекте — укажите отход в таблице CharacteristicTrash"
+        );
+        return;
+      }
+      try {
+        if (chars.length === 0) {
+          const states = await apiGet<Record<string, unknown>[]>("/api/physical-state");
+          const first = states?.[0] as Record<string, unknown> | undefined;
+          const sid =
+            typeof first?.id_state === "number"
+              ? first.id_state
+              : typeof first?.idState === "number"
+                ? first.idState
+                : undefined;
+          if (sid === undefined) {
+            showToast("Нет записей в справочнике PhysicalState");
+            return;
+          }
+          await apiPost("/api/characteristic-trash", {
+            idObjectPlaceTrash: oid,
+            idMagazinTrash: magazinId,
+            idState: sid,
+            weightForYear: 0,
+            squareForYear: 0,
+          });
+        } else {
+          const c = chars[0];
+          const charId = characteristicTrashRowId(c);
+          if (charId === undefined) return;
+          const body = characteristicTrashPutBodySwapMagazin(c, oid, magazinId);
+          await apiPut(`/api/characteristic-trash/${charId}`, body);
+        }
+        await refreshCharacteristicTrashList();
+        setEditingRef(null);
+        showToast("Сохранено");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Ошибка");
+      }
+    },
+    [characteristicTrashList, rows, showToast, refreshCharacteristicTrashList]
+  );
 
   const loadGlobalRelationLists = useCallback(async () => {
     try {
@@ -887,15 +1277,36 @@ export default function App() {
     }
   }, []);
 
+  const loadAllPhones = useCallback(async () => {
+    try {
+      const list = await apiGet<Record<string, unknown>[]>("/api/number-phone");
+      setAllPhones(list);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const loadSection = useCallback(async (s: SectionId) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiGet<Record<string, unknown>[]>(apiPathForSection(s));
-      setRows(Array.isArray(data) ? data : []);
+      if (s === "objects") {
+        const data = await apiGet<Record<string, unknown>[]>(apiPathForSection(s));
+        setRows(Array.isArray(data) ? data : []);
+        try {
+          const chars = await apiGet<Record<string, unknown>[]>("/api/characteristic-trash");
+          setCharacteristicTrashList(Array.isArray(chars) ? chars : []);
+        } catch {
+          setCharacteristicTrashList([]);
+        }
+      } else {
+        const data = await apiGet<Record<string, unknown>[]>(apiPathForSection(s));
+        setRows(Array.isArray(data) ? data : []);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка загрузки");
       setRows([]);
+      if (s === "objects") setCharacteristicTrashList([]);
     } finally {
       setLoading(false);
     }
@@ -913,23 +1324,53 @@ export default function App() {
     void loadGlobalRelationLists();
   }, [loadGlobalRelationLists]);
 
+  useEffect(() => {
+    void loadAllPhones();
+  }, [loadAllPhones]);
+
+  useEffect(() => {
+    setEditingGridRef(null);
+    setGridRefModal(null);
+  }, [section]);
+
   const objectColumnKeys = useMemo(() => OBJECT_COLUMNS.map((c) => c.key), []);
 
   const gridColumns = isGridSection(section) ? getGridDef(section).columns : null;
 
+  const gridUsesGridRef = useMemo(
+    () => !!(gridColumns && gridColumns.some((c) => c.gridRef)),
+    [gridColumns]
+  );
+
+  const objectRowsWithMerged = useMemo(() => {
+    if (section !== "objects") return rows;
+    return mergeCharacteristicsIntoObjectRows(rows, characteristicTrashList);
+  }, [section, rows, characteristicTrashList]);
+
   const displayRows = useMemo(() => {
     if (section === "objects") {
-      return filterAndSortData(rows, objectColumnKeys, ui, getObjectCellValue);
+      return filterAndSortData(objectRowsWithMerged, objectColumnKeys, ui, getObjectCellValue);
     }
     if (gridColumns) {
       const keys = gridColumns.map((c) => c.key);
       return filterAndSortData(rows, keys, ui, (r, k) => {
         const col = gridColumns.find((c) => c.key === k);
-        return col ? gridCellValue(r, col) : "";
+        return col
+          ? gridCellValue(r, col, gridUsesGridRef ? gridRefLists : undefined)
+          : "";
       });
     }
     return rows;
-  }, [rows, section, gridColumns, objectColumnKeys, ui]);
+  }, [
+    objectRowsWithMerged,
+    rows,
+    section,
+    gridColumns,
+    objectColumnKeys,
+    ui,
+    gridUsesGridRef,
+    gridRefLists,
+  ]);
 
   const clearFilters = () =>
     setUi({
@@ -1003,6 +1444,7 @@ export default function App() {
           number: trimmed,
         });
         await refreshObjectRow(id);
+        await loadAllPhones();
         showToast("Телефон добавлен");
         return true;
       } catch (e) {
@@ -1010,7 +1452,27 @@ export default function App() {
         return false;
       }
     },
-    [rows, refreshObjectRow, showToast]
+    [loadAllPhones, rows, refreshObjectRow, showToast]
+  );
+
+  const linkExistingPhoneToObject = useCallback(
+    async (rowIndex: number, phoneId: number, numberValue: string) => {
+      const row = rows[rowIndex];
+      if (!row || typeof row.id_object_place_trash !== "number") return;
+      const objectId = row.id_object_place_trash;
+      try {
+        await apiPut(`/api/number-phone/${phoneId}`, {
+          idObjectPlaceTrash: objectId,
+          number: numberValue,
+        });
+        await refreshObjectRow(objectId);
+        await loadAllPhones();
+        showToast("Номер привязан");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Ошибка");
+      }
+    },
+    [loadAllPhones, refreshObjectRow, rows, showToast]
   );
 
   const relationPath = (kind: ObjectRelationKind, objectId: number) =>
@@ -1178,12 +1640,21 @@ export default function App() {
 
   const pickRef = async (kind: RefKind, rowIndex: number, id: number) => {
     setRefModal(null);
+    if (kind === "magazin") {
+      await pickMagazinForObject(rowIndex, id);
+      return;
+    }
     const patchKey = REF_CONFIG[kind].patchKey;
     await saveObjectPatch(rowIndex, { [patchKey]: id });
   };
 
   const clearRef = async (kind: RefKind, rowIndex: number) => {
     setRefModal(null);
+    if (kind === "magazin") {
+      showToast("Связь с отходом снимите в таблице CharacteristicTrash");
+      setEditingRef(null);
+      return;
+    }
     const patchKey = REF_CONFIG[kind].patchKey;
     await saveObjectPatch(rowIndex, { [patchKey]: FK_CLEAR } as Record<string, unknown>);
     setEditingRef(null);
@@ -1254,9 +1725,37 @@ export default function App() {
         return next;
       });
       showToast("Сохранено");
+      if (sid === "magazin-trash") void loadRefs();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Ошибка");
     }
+  };
+
+  const applyGridFkAndSave = async (
+    rowIndex: number,
+    colKey: string,
+    picked: Record<string, unknown>,
+    sid: GridSectionId
+  ) => {
+    const row = rows[rowIndex];
+    if (!row) return;
+    const next = { ...row, [colKey]: picked };
+    setEditingGridRef(null);
+    setGridRefModal(null);
+    await saveGridRow(next, rowIndex, sid);
+  };
+
+  const applyGridFkClear = async (
+    rowIndex: number,
+    colKey: string,
+    sid: GridSectionId
+  ) => {
+    const row = rows[rowIndex];
+    if (!row) return;
+    const next = { ...row, [colKey]: null };
+    setEditingGridRef(null);
+    setGridRefModal(null);
+    await saveGridRow(next, rowIndex, sid);
   };
 
   const sortHeaderClick = (colKey: string) => {
@@ -1424,10 +1923,10 @@ export default function App() {
                 </thead>
                 <tbody>
                   {section === "objects" &&
-                    displayRows.map((row) => {
+                    displayRows.map((row, rowIndex) => {
                       const idx = resolveObjectRowIndex(row);
                       return (
-                        <tr key={str(row.id_object_place_trash)}>
+                        <tr key={`obj-${rowIndex}-${str(row.id_object_place_trash)}`}>
                           {OBJECT_COLUMNS.map((col) => {
                             const cw = getColWidth(col.key);
                             if (col.ref) {
@@ -1506,7 +2005,9 @@ export default function App() {
                                                     ? "id_storage_scheme"
                                                     : rk === "degree"
                                                       ? "id_gruops_degree"
-                                                      : "id_comments_of_place";
+                                                      : rk === "comments"
+                                                        ? "id_comments_of_place"
+                                                        : "id_magazin_trash";
                                             return (
                                               <div
                                                 key={str(s[idKey])}
@@ -1831,14 +2332,152 @@ export default function App() {
 
                   {isGridSection(section) &&
                     gridColumns &&
-                    displayRows.map((row) => {
+                    displayRows.map((row, rowIndex) => {
                       const sid = section as GridSectionId;
                       const idx = resolveGridRowIndex(row, sid);
                       const idf = idFieldForSection(sid);
                       return (
-                        <tr key={str(row[idf])}>
+                        <tr key={`grid-${sid}-${rowIndex}-${str(row[idf])}`}>
                           {gridColumns.map((col) => {
                             const gcw = getColWidth(col.key);
+                            if (col.gridRef) {
+                              const gk = col.gridRef;
+                              const spec = GRID_REF_SPECS[gk];
+                              const val = gridCellValue(row, col, gridRefLists);
+                              const sug = gridRefLists[gk].filter((r) =>
+                                spec
+                                  .display(r)
+                                  .toLowerCase()
+                                  .includes((editingGridRef?.filter ?? "").toLowerCase())
+                              );
+                              const showAc =
+                                editingGridRef?.kind === gk &&
+                                editingGridRef.rowIndex === idx &&
+                                editingGridRef.colKey === col.key &&
+                                editingGridRef.filter.length > 0;
+                              return (
+                                <td
+                                  key={col.key}
+                                  className="reference-cell"
+                                  style={{ width: gcw, minWidth: 64 }}
+                                >
+                                  {editingGridRef?.kind === gk &&
+                                  editingGridRef.rowIndex === idx &&
+                                  editingGridRef.colKey === col.key ? (
+                                    <div className="cell-editor" style={{ position: "relative" }}>
+                                      <input
+                                        className="autocomplete-input cell-input-minimal"
+                                        autoFocus
+                                        value={editingGridRef.filter}
+                                        placeholder="Введите или выберите..."
+                                        onChange={(e) =>
+                                          setEditingGridRef({
+                                            kind: gk,
+                                            rowIndex: idx,
+                                            colKey: col.key,
+                                            filter: e.target.value,
+                                          })
+                                        }
+                                        onBlur={() =>
+                                          setTimeout(() => setEditingGridRef(null), 150)
+                                        }
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") setEditingGridRef(null);
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="table-icon-btn"
+                                        title="Открыть справочник"
+                                        aria-label="Открыть справочник"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() =>
+                                          setGridRefModal({
+                                            kind: gk,
+                                            rowIndex: idx,
+                                            colKey: col.key,
+                                            section: sid,
+                                          })
+                                        }
+                                      >
+                                        <IconPencil />
+                                      </button>
+                                      {showAc && (spec.nullable || sug.length > 0) && (
+                                        <div
+                                          className="autocomplete-list"
+                                          style={{
+                                            position: "absolute",
+                                            top: "100%",
+                                            left: 0,
+                                            right: 32,
+                                          }}
+                                        >
+                                          {spec.nullable ? (
+                                            <div
+                                              className="autocomplete-item autocomplete-item-clear"
+                                              onMouseDown={(e) => e.preventDefault()}
+                                              onClick={() =>
+                                                void applyGridFkClear(idx, col.key, sid)
+                                              }
+                                            >
+                                              — Не выбрано
+                                            </div>
+                                          ) : null}
+                                          {sug.slice(0, 12).map((s) => (
+                                            <div
+                                              key={str(s[spec.idField])}
+                                              className="autocomplete-item"
+                                              onMouseDown={(e) => e.preventDefault()}
+                                              onClick={() =>
+                                                void applyGridFkAndSave(idx, col.key, s, sid)
+                                              }
+                                            >
+                                              {spec.display(s)}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                      }}
+                                      onClick={() =>
+                                        setEditingGridRef({
+                                          kind: gk,
+                                          rowIndex: idx,
+                                          colKey: col.key,
+                                          filter: val,
+                                        })
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ")
+                                          setEditingGridRef({
+                                            kind: gk,
+                                            rowIndex: idx,
+                                            colKey: col.key,
+                                            filter: val,
+                                          });
+                                      }}
+                                    >
+                                      <span>
+                                        {val || (
+                                          <span className="cell-placeholder">[выбрать]</span>
+                                        )}
+                                      </span>
+                                      <span className="cell-ref-action" title="Справочник" aria-hidden>
+                                        <IconPencil />
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            }
                             if (col.readOnly || col.format) {
                               return (
                                 <td key={col.key} style={{ width: gcw, minWidth: 64 }}>
@@ -1948,16 +2587,47 @@ export default function App() {
         />
       )}
 
+      {gridRefModal && (
+        <GridReferenceModal
+          kind={gridRefModal.kind}
+          rows={gridRefLists[gridRefModal.kind]}
+          onClose={() => setGridRefModal(null)}
+          onPick={(picked) =>
+            void applyGridFkAndSave(
+              gridRefModal.rowIndex,
+              gridRefModal.colKey,
+              picked,
+              gridRefModal.section
+            )
+          }
+          onCreated={(created) => mergeGridRefIntoCache(gridRefModal.kind, created)}
+          showToast={showToast}
+          allowClear={GRID_REF_SPECS[gridRefModal.kind].nullable === true}
+          onClear={() =>
+            void applyGridFkClear(
+              gridRefModal.rowIndex,
+              gridRefModal.colKey,
+              gridRefModal.section
+            )
+          }
+        />
+      )}
+
       {phoneModalRowIndex !== null &&
         rows[phoneModalRowIndex] &&
         typeof rows[phoneModalRowIndex].id_object_place_trash === "number" && (
           <PhoneModal
             row={rows[phoneModalRowIndex]}
+            allPhones={allPhones}
             onClose={() => setPhoneModalRowIndex(null)}
             onRefresh={async () => {
               const r = rows[phoneModalRowIndex];
               const id = r?.id_object_place_trash;
               if (typeof id === "number") await refreshObjectRow(id);
+            }}
+            onRefreshAll={loadAllPhones}
+            onLinkExisting={async (phoneId, numberValue) => {
+              await linkExistingPhoneToObject(phoneModalRowIndex, phoneId, numberValue);
             }}
             showToast={showToast}
           />

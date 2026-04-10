@@ -4,7 +4,13 @@
  * "date/отношения таблицы и порядок.xlsx" (строка названий + строка JSON-полей).
  */
 
-export type RefKind = "cities" | "group" | "storage" | "degree" | "comments";
+export type RefKind =
+  | "cities"
+  | "group"
+  | "storage"
+  | "degree"
+  | "comments"
+  | "magazin";
 
 export type ObjectCol = {
   key: string;
@@ -19,6 +25,8 @@ export type ObjectCol = {
 export const OBJECT_COLUMNS: ObjectCol[] = [
   { key: "id_registration", label: "Код регистрации", editable: true },
   { key: "register", label: "Реестровый номер", editable: true, type: "number" },
+  { key: "__code_trash", label: "Код отхода", ref: "magazin" },
+  { key: "__name_trash", label: "Наименование отхода", ref: "magazin" },
   { key: "date_register", label: "Дата регистрации", editable: true, type: "date" },
   { key: "__region", label: "Область", ref: "group" },
   { key: "name_obj", label: "Наименование объекта", editable: true, multiline: true },
