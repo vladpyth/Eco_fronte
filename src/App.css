@@ -239,6 +239,11 @@ body {
   overflow: visible;
 }
 
+.data-table td.cell-auto-filled {
+  background-color: #fef9c3;
+  box-shadow: inset 0 0 0 1px #fde047;
+}
+
 .td-cell-multiline {
   vertical-align: top;
 }

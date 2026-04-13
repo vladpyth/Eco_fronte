@@ -337,7 +337,9 @@ function filterAndSortData(
   rows: Record<string, unknown>[],
   columns: string[],
   ui: UiState,
-  cellValue: (row: Record<string, unknown>, col: string) => string
+  cellValue: (row: Record<string, unknown>, col: string) => string,
+  /** Без явной сортировки по столбцу — новые строки (больший id) сверху. */
+  primaryIdField: string
 ): Record<string, unknown>[] {
   let filtered = [...rows];
   if (ui.searchQuery.trim()) {
@@ -358,6 +360,19 @@ function filterAndSortData(
       if (isNum) cmp = an - bn;
       else cmp = av.toLowerCase().localeCompare(bv.toLowerCase());
       return ui.sortDirection === "asc" ? cmp : -cmp;
+    });
+  } else {
+    filtered.sort((a, b) => {
+      const av = a[primaryIdField];
+      const bv = b[primaryIdField];
+      const an = typeof av === "number" ? av : Number(av);
+      const bn = typeof bv === "number" ? bv : Number(bv);
+      const aOk = Number.isFinite(an);
+      const bOk = Number.isFinite(bn);
+      if (aOk && bOk) return bn - an;
+      if (aOk && !bOk) return -1;
+      if (!aOk && bOk) return 1;
+      return 0;
     });
   }
   return filtered;
@@ -1027,6 +1042,8 @@ function ReferenceModal(props: {
 export default function App() {
   const [section, setSection] = useState<SectionId>("objects");
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  /** Ячейки справочника отходов, подсвеченные как автозаполненные при создании (`id::colKey`). */
+  const [magazinAutoCells, setMagazinAutoCells] = useState<Record<string, boolean>>({});
   /** Для колонок кода/наименования отхода (CharacteristicTrash → MagazinTrash) */
   const [characteristicTrashList, setCharacteristicTrashList] = useState<
     Record<string, unknown>[]
@@ -1063,6 +1080,31 @@ export default function App() {
 
   const colWidthsRef = useRef(colWidths);
   colWidthsRef.current = colWidths;
+
+  const clearMagazinAutoCell = useCallback((rowId: number, colKey: string) => {
+    setMagazinAutoCells((prev) => {
+      const k = `${rowId}::${colKey}`;
+      if (!prev[k]) return prev;
+      const next = { ...prev };
+      delete next[k];
+      return next;
+    });
+  }, []);
+
+  const stripMagazinAutoRow = useCallback((rowId: number) => {
+    const prefix = `${rowId}::`;
+    setMagazinAutoCells((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (key.startsWith(prefix)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
 
   const beginColumnResize = useCallback(
     (colKey: string, clientX: number) => {
@@ -1102,6 +1144,10 @@ export default function App() {
     typeTrash1: [],
     levelTrash: [],
     nameGroup: [],
+    objectPlaceTrash: [],
+    magazinTrashCode: [],
+    magazinTrashName: [],
+    physicalState: [],
   });
   const [regionsList, setRegionsList] = useState<Record<string, unknown>[]>([]);
 
@@ -1171,6 +1217,8 @@ export default function App() {
         typeTrash1,
         levelTrash,
         nameGroup,
+        objectPlaceTrash,
+        physicalState,
       ] = await Promise.all([
         apiGet<Record<string, unknown>[]>("/api/cities"),
         apiGet<Record<string, unknown>[]>("/api/group-place-save"),
@@ -1183,9 +1231,20 @@ export default function App() {
         apiGet<Record<string, unknown>[]>("/api/type-trash1"),
         apiGet<Record<string, unknown>[]>("/api/level-trash"),
         apiGet<Record<string, unknown>[]>("/api/name-group"),
+        apiGet<Record<string, unknown>[]>("/api/object-place-trash"),
+        apiGet<Record<string, unknown>[]>("/api/physical-state"),
       ]);
       setRefCache({ cities, group, storage, degree, comments, magazin });
-      setGridRefLists({ classDanger, typeTrash1, levelTrash, nameGroup });
+      setGridRefLists({
+        classDanger,
+        typeTrash1,
+        levelTrash,
+        nameGroup,
+        objectPlaceTrash: Array.isArray(objectPlaceTrash) ? objectPlaceTrash : [],
+        magazinTrashCode: Array.isArray(magazin) ? magazin : [],
+        magazinTrashName: Array.isArray(magazin) ? magazin : [],
+        physicalState: Array.isArray(physicalState) ? physicalState : [],
+      });
       setRegionsList(regions);
     } catch {
       /* ignore */
@@ -1348,17 +1407,30 @@ export default function App() {
   }, [section, rows, characteristicTrashList]);
 
   const displayRows = useMemo(() => {
+    const primaryIdField = idFieldForSection(section);
     if (section === "objects") {
-      return filterAndSortData(objectRowsWithMerged, objectColumnKeys, ui, getObjectCellValue);
+      return filterAndSortData(
+        objectRowsWithMerged,
+        objectColumnKeys,
+        ui,
+        getObjectCellValue,
+        primaryIdField
+      );
     }
     if (gridColumns) {
       const keys = gridColumns.map((c) => c.key);
-      return filterAndSortData(rows, keys, ui, (r, k) => {
-        const col = gridColumns.find((c) => c.key === k);
-        return col
-          ? gridCellValue(r, col, gridUsesGridRef ? gridRefLists : undefined)
-          : "";
-      });
+      return filterAndSortData(
+        rows,
+        keys,
+        ui,
+        (r, k) => {
+          const col = gridColumns.find((c) => c.key === k);
+          return col
+            ? gridCellValue(r, col, gridUsesGridRef ? gridRefLists : undefined)
+            : "";
+        },
+        primaryIdField
+      );
     }
     return rows;
   }, [
@@ -1668,6 +1740,7 @@ export default function App() {
     try {
       await apiDelete(`${apiPathForSection(s)}/${id}`);
       showToast("Удалено");
+      if (s === "magazin-trash") stripMagazinAutoRow(id);
       await loadSection(s);
       void loadRefs();
     } catch (e) {
@@ -1679,8 +1752,25 @@ export default function App() {
     const def = getGridDef(sid);
     try {
       const body = await def.createDefault();
-      await apiPost(def.apiPath, body);
+      const created = await apiPost<Record<string, unknown>>(def.apiPath, body);
       showToast("Строка добавлена");
+      if (sid === "magazin-trash") {
+        const nid =
+          typeof created.id_magazin_trash === "number"
+            ? created.id_magazin_trash
+            : typeof created.idMagazinTrash === "number"
+              ? created.idMagazinTrash
+              : null;
+        if (nid != null && nid > 0) {
+          setMagazinAutoCells((prev) => {
+            const next = { ...prev };
+            for (const c of def.columns) {
+              next[`${nid}::${c.key}`] = true;
+            }
+            return next;
+          });
+        }
+      }
       await loadSection(sid);
       void loadRefs();
     } catch (e) {
@@ -1713,7 +1803,7 @@ export default function App() {
     const def = getGridDef(sid);
     const idf = def.idField;
     const id = row[idf];
-    if (typeof id !== "number") return;
+    if (typeof id !== "number" || id < 0) return;
     try {
       const body = def.toRequest(row);
       const updated = await apiPut<Record<string, unknown>>(`${def.apiPath}/${id}`, body);
@@ -1731,6 +1821,53 @@ export default function App() {
     }
   };
 
+  const characteristicFkTarget = (colKey: string): string => {
+    if (colKey === "__register") return "id_object_place_trash";
+    if (colKey === "__code_trash" || colKey === "__name_trash")
+      return "id_magazin_trash";
+    if (colKey === "__state") return "id_state";
+    return colKey;
+  };
+
+  const updateCharacteristicClassDanger = async (
+    row: Record<string, unknown>,
+    nextClassDanger: Record<string, unknown> | null
+  ) => {
+    const rawMag = row.id_magazin_trash;
+    const magId =
+      typeof rawMag === "number" ? rawMag : getNestedId(rawMag, "id_magazin_trash");
+    if (magId == null || magId <= 0) {
+      showToast("Не найден связанный отход");
+      return;
+    }
+    const existingMag =
+      (rawMag && typeof rawMag === "object" ? (rawMag as Record<string, unknown>) : null) ??
+      gridRefLists.magazinTrashCode.find(
+        (m) => getNestedId(m, "id_magazin_trash") === magId
+      ) ??
+      gridRefLists.magazinTrashName.find(
+        (m) => getNestedId(m, "id_magazin_trash") === magId
+      );
+    if (!existingMag) {
+      showToast("Не удалось загрузить запись отхода");
+      return;
+    }
+    try {
+      const magDef = getGridDef("magazin-trash");
+      const body = magDef.toRequest({
+        ...existingMag,
+        id_magazin_trash: magId,
+        id_class_danger: nextClassDanger,
+      });
+      await apiPut<Record<string, unknown>>(`${magDef.apiPath}/${magId}`, body);
+      showToast("Сохранено");
+      await loadSection("characteristic-trash");
+      void loadRefs();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка");
+    }
+  };
+
   const applyGridFkAndSave = async (
     rowIndex: number,
     colKey: string,
@@ -1739,7 +1876,20 @@ export default function App() {
   ) => {
     const row = rows[rowIndex];
     if (!row) return;
-    const next = { ...row, [colKey]: picked };
+    if (sid === "characteristic-trash" && colKey === "__class_danger") {
+      setEditingGridRef(null);
+      setGridRefModal(null);
+      await updateCharacteristicClassDanger(row, picked);
+      return;
+    }
+    const idf = getGridDef(sid).idField;
+    const oid = row[idf];
+    if (sid === "magazin-trash" && typeof oid === "number" && oid > 0) {
+      clearMagazinAutoCell(oid, colKey);
+    }
+    const targetKey =
+      sid === "characteristic-trash" ? characteristicFkTarget(colKey) : colKey;
+    const next = { ...row, [targetKey]: picked };
     setEditingGridRef(null);
     setGridRefModal(null);
     await saveGridRow(next, rowIndex, sid);
@@ -1752,7 +1902,20 @@ export default function App() {
   ) => {
     const row = rows[rowIndex];
     if (!row) return;
-    const next = { ...row, [colKey]: null };
+    if (sid === "characteristic-trash" && colKey === "__class_danger") {
+      setEditingGridRef(null);
+      setGridRefModal(null);
+      await updateCharacteristicClassDanger(row, null);
+      return;
+    }
+    const idf = getGridDef(sid).idField;
+    const oid = row[idf];
+    if (sid === "magazin-trash" && typeof oid === "number" && oid > 0) {
+      clearMagazinAutoCell(oid, colKey);
+    }
+    const targetKey =
+      sid === "characteristic-trash" ? characteristicFkTarget(colKey) : colKey;
+    const next = { ...row, [targetKey]: null };
     setEditingGridRef(null);
     setGridRefModal(null);
     await saveGridRow(next, rowIndex, sid);
@@ -2336,10 +2499,17 @@ export default function App() {
                       const sid = section as GridSectionId;
                       const idx = resolveGridRowIndex(row, sid);
                       const idf = idFieldForSection(sid);
+                      const rid = row[idf];
                       return (
                         <tr key={`grid-${sid}-${rowIndex}-${str(row[idf])}`}>
                           {gridColumns.map((col) => {
                             const gcw = getColWidth(col.key);
+                            const autoFill =
+                              sid === "magazin-trash" &&
+                              typeof rid === "number" &&
+                              rid > 0 &&
+                              magazinAutoCells[`${rid}::${col.key}`];
+                            const autoTd = autoFill ? " cell-auto-filled" : "";
                             if (col.gridRef) {
                               const gk = col.gridRef;
                               const spec = GRID_REF_SPECS[gk];
@@ -2358,7 +2528,7 @@ export default function App() {
                               return (
                                 <td
                                   key={col.key}
-                                  className="reference-cell"
+                                  className={`reference-cell${autoTd}`}
                                   style={{ width: gcw, minWidth: 64 }}
                                 >
                                   {editingGridRef?.kind === gk &&
@@ -2480,7 +2650,11 @@ export default function App() {
                             }
                             if (col.readOnly || col.format) {
                               return (
-                                <td key={col.key} style={{ width: gcw, minWidth: 64 }}>
+                                <td
+                                  key={col.key}
+                                  className={autoFill ? "cell-auto-filled" : undefined}
+                                  style={{ width: gcw, minWidth: 64 }}
+                                >
                                   {col.format ? col.format(row) : gridCellValue(row, col)}
                                 </td>
                               );
@@ -2488,13 +2662,24 @@ export default function App() {
                             if (col.type === "bool") {
                               const v = gridCellValue(row, col);
                               return (
-                                <td key={col.key} style={{ width: gcw, minWidth: 64 }}>
+                                <td
+                                  key={col.key}
+                                  className={autoFill ? "cell-auto-filled" : undefined}
+                                  style={{ width: gcw, minWidth: 64 }}
+                                >
                                   <select
                                     key={`${str(row[idf])}-${col.key}-${str(row[col.key])}`}
                                     className="filter-select cell-select-minimal"
                                     style={{ width: "100%" }}
                                     defaultValue={v}
                                     onChange={(e) => {
+                                      if (
+                                        sid === "magazin-trash" &&
+                                        typeof rid === "number" &&
+                                        rid > 0
+                                      ) {
+                                        clearMagazinAutoCell(rid, col.key);
+                                      }
                                       const next = {
                                         ...row,
                                         [col.key]: parseGridInput(e.target.value, col, row),
@@ -2511,7 +2696,11 @@ export default function App() {
                             }
                             const defVal = gridInputDefault(row, col);
                             return (
-                              <td key={col.key} style={{ width: gcw, minWidth: 64 }}>
+                              <td
+                                key={col.key}
+                                className={autoFill ? "cell-auto-filled" : undefined}
+                                style={{ width: gcw, minWidth: 64 }}
+                              >
                                 <input
                                   key={`${str(row[idf])}-${col.key}-${defVal}`}
                                   className="cell-input-minimal"
@@ -2526,6 +2715,13 @@ export default function App() {
                                           : "text"
                                   }
                                   onBlur={(e) => {
+                                    if (
+                                      sid === "magazin-trash" &&
+                                      typeof rid === "number" &&
+                                      rid > 0
+                                    ) {
+                                      clearMagazinAutoCell(rid, col.key);
+                                    }
                                     const next = {
                                       ...row,
                                       [col.key]: parseGridInput(e.target.value, col, row),

@@ -32,6 +32,8 @@ export type SimpleCol = {
   format?: (row: Record<string, unknown>) => string;
   /** Связь со справочником (таблица «Справочник отходов» и др.) */
   gridRef?: GridRefKind;
+  /** В ячейке 0 показывать пусто (новая строка MagazinTrash) */
+  emptyZero?: boolean;
 };
 
 export type GridSectionDef = {
@@ -49,24 +51,26 @@ function S(v: unknown): string {
   return String(v);
 }
 
+/** Невидимый заполнитель для @NotBlank в API (в таблице показываем как пусто). */
 /** ID из числа в строке или из вложенного объекта сущности */
 export function pickFk(val: unknown, nestedIdField: string): number {
   if (typeof val === "number" && Number.isFinite(val)) return val;
   return getNestedId(val, nestedIdField) ?? 0;
 }
 
-/** FK MagazinTrash → ClassDanger: допускается отсутствие связи (null в API). */
-function magazinClassDangerOrNull(row: Record<string, unknown>): number | null {
-  const v = row.id_class_danger;
-  if (v === null || v === undefined) return null;
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  return getNestedId(v, "id_class_danger") ?? null;
-}
-
 function magazinIntField(row: Record<string, unknown>, key: string): number {
   const n = Number(row[key] ?? 0);
   if (!Number.isFinite(n)) return 0;
   return Math.trunc(n);
+}
+
+/** Валидный id класса опасности или null → в теле запроса подставится FK_CLEAR (-1). */
+function magazinClassDangerOrNull(row: Record<string, unknown>): number | null {
+  const v = row.id_class_danger;
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return v > 0 ? v : null;
+  const id = getNestedId(v, "id_class_danger");
+  return id != null && id > 0 ? id : null;
 }
 
 /**
@@ -116,7 +120,17 @@ function cellStr(
   if (col.format) return col.format(row);
   if (col.gridRef) {
     const spec = GRID_REF_SPECS[col.gridRef];
-    const v = row[col.key];
+    const v =
+      col.key === "__register"
+        ? row.id_object_place_trash
+        : col.key === "__code_trash" || col.key === "__name_trash"
+          ? row.id_magazin_trash
+          : col.key === "__class_danger"
+            ? (row.id_magazin_trash as Record<string, unknown> | null | undefined)
+                ?.id_class_danger
+          : col.key === "__state"
+            ? row.id_state
+            : row[col.key];
     if (v && typeof v === "object") return spec.display(v as Record<string, unknown>);
     const id = typeof v === "number" ? v : getNestedId(v, spec.idField);
     if (id != null && gridRefCache) {
@@ -343,26 +357,30 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     sidebar: "Характеристики отходов",
     columns: [
       {
-        key: "__obj",
-        label: "Объект",
-        readOnly: true,
-        format: (row) => S((row.id_object_place_trash as Record<string, unknown>)?.name_obj),
+        key: "__register",
+        label: "Рег. номер",
+        gridRef: "objectPlaceTrash",
       },
-      { key: "id_object_place_trash", label: "ID объекта", type: "number" },
       {
-        key: "__mt",
-        label: "Отход (справочник)",
-        readOnly: true,
-        format: (row) => S((row.id_magazin_trash as Record<string, unknown>)?.name_trash),
+        key: "__code_trash",
+        label: "Код отхода",
+        gridRef: "magazinTrashCode",
       },
-      { key: "id_magazin_trash", label: "ID отхода", type: "number" },
       {
-        key: "__st",
-        label: "Физ. состояние",
-        readOnly: true,
-        format: (row) => S((row.id_state as Record<string, unknown>)?.state),
+        key: "__name_trash",
+        label: "Наименование отхода",
+        gridRef: "magazinTrashName",
       },
-      { key: "id_state", label: "ID состояния", type: "number" },
+      {
+        key: "__state",
+        label: "Физическое состояние",
+        gridRef: "physicalState",
+      },
+      {
+        key: "__class_danger",
+        label: "Класс опасности",
+        gridRef: "classDanger",
+      },
       { key: "weight_for_year", label: "Вес за год, т", type: "float" },
       { key: "square_for_year", label: "Объём/площадь за год", type: "float" },
     ],
@@ -451,6 +469,7 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
 };
 
 export const GRID_SECTION_ORDER: GridSectionId[] = [
+  "characteristic-trash",
   "magazin-trash",
   "around-build",
   "natual-save-building",
@@ -465,7 +484,6 @@ export const GRID_SECTION_ORDER: GridSectionId[] = [
   "storage-scheme",
   "gruops-degree",
   "comments-of-place",
-  "characteristic-trash",
   "cleaner-builds",
   "number-phone",
 ];
