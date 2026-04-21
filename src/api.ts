@@ -212,15 +212,10 @@ export function objectPlaceTrashToRequest(
     register: Number(patch.register ?? o.register ?? 0),
     dateRegister: dateStr,
     citiesId: fk(patch, "citiesId", o.id_cities, "id_cities"),
+    regionId: fk(patch, "regionId", o.id_region, "id_region"),
     groupPlaceSaveId: fk(patch, "groupPlaceSaveId", o.id_group_place_save, "id_group_place_save"),
     storageSchemeId: fk(patch, "storageSchemeId", o.id_storage_scheme, "id_storage_scheme"),
     gruopsDegreeId: fk(patch, "gruopsDegreeId", o.id_gruops_degree, "id_gruops_degree"),
-    commentsOfPlaceId: fk(
-      patch,
-      "commentsOfPlaceId",
-      o.id_comments_of_place,
-      "id_comments_of_place"
-    ),
     nameObj: strOrEmpty(patch.name_obj ?? o.name_obj),
     nameOwn: strOrEmpty(patch.name_own ?? o.name_own),
     startUse: startUseFromPatchOrRow(patch, o),
@@ -276,7 +271,8 @@ export function formatCity(c: unknown): string {
 
 export function formatGroupPlace(g: unknown): string {
   if (!g || typeof g !== "object") return "";
-  return strOrEmpty((g as Record<string, unknown>).name_region);
+  const o = g as Record<string, unknown>;
+  return strOrEmpty(o.name_group ?? o.name_region);
 }
 
 export function formatStorage(s: unknown): string {
@@ -290,7 +286,3 @@ export function formatDegree(d: unknown): string {
   return n === undefined || n === null ? "" : String(n);
 }
 
-export function formatComment(c: unknown): string {
-  if (!c || typeof c !== "object") return "";
-  return strOrEmpty((c as Record<string, unknown>).comments);
-}

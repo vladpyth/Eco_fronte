@@ -6,10 +6,10 @@
 
 export type RefKind =
   | "cities"
+  | "region"
   | "group"
   | "storage"
   | "degree"
-  | "comments"
   | "magazin";
 
 export type ObjectCol = {
@@ -28,7 +28,7 @@ export const OBJECT_COLUMNS: ObjectCol[] = [
   { key: "__code_trash", label: "Код отхода", ref: "magazin" },
   { key: "__name_trash", label: "Наименование отхода", ref: "magazin" },
   { key: "date_register", label: "Дата регистрации", editable: true, type: "date" },
-  { key: "__region", label: "Область", ref: "group" },
+  { key: "__region", label: "Область", ref: "region" },
   { key: "name_obj", label: "Наименование объекта", editable: true, multiline: true },
   { key: "name_own", label: "Наименование собственника", editable: true, multiline: true },
   { key: "start_use", label: "Начало эксплуатации", editable: true, type: "number" },
@@ -56,7 +56,6 @@ export const OBJECT_COLUMNS: ObjectCol[] = [
   { key: "__around", label: "Природоохранные сооружения", editable: false },
   { key: "__natural", label: "Населенные пункты", editable: false },
   { key: "__degree", label: "Группы", ref: "degree" },
-  { key: "__comments", label: "Примечания", ref: "comments" },
   { key: "date_axclute", label: "Дата исключения из реестра", editable: true, type: "date" },
   { key: "reson_axclute", label: "Основание", editable: true, multiline: true },
   { key: "status", label: "Исключен", editable: true, type: "bool" },

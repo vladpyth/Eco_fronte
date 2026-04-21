@@ -5,6 +5,7 @@
 
 export type GridRefKind =
   | "classDanger"
+  | "region"
   | "typeTrash1"
   | "levelTrash"
   | "nameGroup"
@@ -39,6 +40,19 @@ export const GRID_REF_SPECS: Record<
       const n = parseInt(raw.trim(), 10);
       if (Number.isNaN(n)) throw new Error("Введите целое число");
       return { classDanger: n };
+    },
+  },
+  region: {
+    apiPath: "/api/region",
+    idField: "id_region",
+    display: (r) => String(r.name_region ?? ""),
+    modalTitle: "Область",
+    primaryHeader: "Название области",
+    placeholder: "Новая область",
+    quickCreateFromInput: (raw) => {
+      const t = raw.trim();
+      if (!t) throw new Error("Введите название");
+      return { nameRegion: t };
     },
   },
   typeTrash1: {

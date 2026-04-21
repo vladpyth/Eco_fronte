@@ -9,7 +9,6 @@ export type GridSectionId =
   | "cities"
   | "classDanger"
   | "cleaner-builds"
-  | "comments-of-place"
   | "group-place-save"
   | "gruops-degree"
   | "level-trash"
@@ -91,9 +90,6 @@ function magazinTrashApiBody(row: Record<string, unknown>): Record<string, unkno
   let name = S(row.name_trash).trim().slice(0, 50);
   if (!name) name = "Отход";
 
-  let level4 = S(row.level4).trim();
-  if (!level4) level4 = "I";
-
   return {
     /** null в JSON иногда режется прокси/клиентом; -1 = сброс FK (как ObjectPlaceTrash) */
     idClassDanger: (() => {
@@ -105,10 +101,9 @@ function magazinTrashApiBody(row: Record<string, unknown>): Record<string, unkno
     idMameGroup: pickFk(row.id_mame_group, "id_mame_group"),
     codeTrash: code,
     nameTrash: name,
-    level1: magazinIntField(row, "level1"),
+    block1: magazinIntField(row, "block1"),
     group2: magazinIntField(row, "group2"),
-    level3: magazinIntField(row, "level3"),
-    level4,
+    group3: magazinIntField(row, "group3"),
   };
 }
 
@@ -237,27 +232,22 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     title: "Города (Cities)",
     sidebar: "Города",
     columns: [
+      { key: "name_cities", label: "Город", type: "text" },
       { key: "index", label: "Индекс", type: "text" },
       { key: "district", label: "Район", type: "text" },
-      {
-        key: "__region_name",
-        label: "Регион",
-        readOnly: true,
-        format: (row) => {
-          const reg = row.id_region;
-          if (reg && typeof reg === "object")
-            return S((reg as Record<string, unknown>).name_region);
-          return "";
-        },
-      },
+      { key: "id_region", label: "Область", gridRef: "region" },
     ],
     toRequest: (row) => {
       const reg = row.id_region;
       let idRegion = 1;
-      if (reg && typeof reg === "object")
+      if (typeof reg === "number") idRegion = reg;
+      else if (reg && typeof reg === "object")
         idRegion = Number((reg as Record<string, unknown>).id_region) || 1;
+      const cityName = S(row.name_cities).trim();
       return {
         idRegion,
+        nameCities: cityName || "Новый город",
+        name_cities: cityName || "Новый город",
         index: S(row.index),
         district: S(row.district),
       };
@@ -268,7 +258,13 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
         regions[0] && typeof regions[0].id_region === "number"
           ? regions[0].id_region
           : 1;
-      return { idRegion: rid, index: "000000", district: "Район" };
+      return {
+        idRegion: rid,
+        nameCities: "Новый город",
+        name_cities: "Новый город",
+        index: "000000",
+        district: "Район",
+      };
     },
   },
   "group-place-save": {
@@ -276,9 +272,9 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_group_place_save",
     title: "Группы мест сохранения (GroupPlaceSave)",
     sidebar: "Группы мест",
-    columns: [{ key: "name_region", label: "Название", type: "text" }],
-    toRequest: (row) => ({ nameRegion: S(row.name_region) }),
-    createDefault: async () => ({ nameRegion: "Новая группа" }),
+    columns: [{ key: "name_group", label: "Название", type: "text" }],
+    toRequest: (row) => ({ nameGroup: S(row.name_group ?? row.name_region) }),
+    createDefault: async () => ({ nameGroup: "Новая группа" }),
   },
   "storage-scheme": {
     apiPath: "/api/storage-scheme",
@@ -298,15 +294,6 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     toRequest: (row) => ({ namberGruop: Number(row.namber_gruop ?? 0) }),
     createDefault: async () => ({ namberGruop: 1 }),
   },
-  "comments-of-place": {
-    apiPath: "/api/comments-of-place",
-    idField: "id_comments_of_place",
-    title: "Комментарии к объектам (CommentsOfPlace)",
-    sidebar: "Комментарии",
-    columns: [{ key: "comments", label: "Текст", type: "text" }],
-    toRequest: (row) => ({ comments: S(row.comments) }),
-    createDefault: async () => ({ comments: "Новый комментарий" }),
-  },
   "magazin-trash": {
     apiPath: "/api/magazin-trash",
     idField: "id_magazin_trash",
@@ -317,12 +304,11 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       { key: "name_trash", label: "Наименование отхода", type: "text" },
       { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
       { key: "id_type_trash", label: "Тип отхода", gridRef: "typeTrash1" },
-      { key: "id_level_trash", label: "Уровень", gridRef: "levelTrash" },
+      { key: "id_level_trash", label: "Блок", gridRef: "levelTrash" },
       { key: "id_mame_group", label: "Группа наименований", gridRef: "nameGroup" },
-      { key: "level1", label: "Уровень 1", type: "number" },
+      { key: "block1", label: "Раздел", type: "number" },
       { key: "group2", label: "Группа 2", type: "number" },
-      { key: "level3", label: "Уровень 3", type: "number" },
-      { key: "level4", label: "Уровень 4", type: "text" },
+      { key: "group3", label: "Группа 3", type: "number" },
     ],
     toRequest: (row) => magazinTrashApiBody(row),
     createDefault: async () => {
@@ -343,10 +329,9 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
         idMameGroup: pickFk(ng[0], "id_mame_group"),
         codeTrash: `C${Date.now() % 1e8}`.slice(0, 8),
         nameTrash: "Новый отход",
-        level1: 1,
+        block1: 1,
         group2: 1,
-        level3: 1,
-        level4: "I",
+        group3: 1,
       };
     },
   },
@@ -483,7 +468,6 @@ export const GRID_SECTION_ORDER: GridSectionId[] = [
   "group-place-save",
   "storage-scheme",
   "gruops-degree",
-  "comments-of-place",
   "cleaner-builds",
   "number-phone",
 ];

@@ -6,7 +6,6 @@ import {
   apiPost,
   apiPut,
   formatCity,
-  formatComment,
   formatDegree,
   formatGroupPlace,
   formatStorage,
@@ -82,10 +81,10 @@ const REF_CONFIG: Record<
     path: string;
     patchKey:
       | "citiesId"
+      | "regionId"
       | "groupPlaceSaveId"
       | "storageSchemeId"
       | "gruopsDegreeId"
-      | "commentsOfPlaceId"
       | "magazinTrashId";
     display: (row: Record<string, unknown>) => string;
     primaryHeader: string;
@@ -98,11 +97,18 @@ const REF_CONFIG: Record<
     display: (r) => formatCity(r),
     primaryHeader: "Город",
   },
+  region: {
+    title: "Области",
+    path: "/api/region",
+    patchKey: "regionId",
+    display: (r) => String(r.name_region ?? ""),
+    primaryHeader: "Область",
+  },
   group: {
     title: "Группы мест сохранения",
     path: "/api/group-place-save",
     patchKey: "groupPlaceSaveId",
-    display: (r) => String(r.name_region ?? ""),
+    display: (r) => String(r.name_group ?? r.name_region ?? ""),
     primaryHeader: "Регион (группа)",
   },
   storage: {
@@ -118,13 +124,6 @@ const REF_CONFIG: Record<
     patchKey: "gruopsDegreeId",
     display: (r) => String(r.namber_gruop ?? ""),
     primaryHeader: "Номер группы",
-  },
-  comments: {
-    title: "Комментарии",
-    path: "/api/comments-of-place",
-    patchKey: "commentsOfPlaceId",
-    display: (r) => String(r.comments ?? "").slice(0, 80),
-    primaryHeader: "Комментарий",
   },
   magazin: {
     title: "Справочник отходов",
@@ -233,35 +232,22 @@ function magazinFromCharacteristic(c: Record<string, unknown>): Record<string, u
   return undefined;
 }
 
+function characteristicMagazinId(c: Record<string, unknown>): number | undefined {
+  const v = c.id_magazin_trash ?? c.idMagazinTrash;
+  if (typeof v === "number") return v;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return (
+      getNestedId(v, "id_magazin_trash") ??
+      (typeof o.idMagazinTrash === "number" ? o.idMagazinTrash : undefined)
+    );
+  }
+  return undefined;
+}
+
 function characteristicTrashRowId(c: Record<string, unknown>): number | undefined {
   const v = c.id_characteristic_trash ?? c.idCharacteristicTrash;
   return typeof v === "number" ? v : undefined;
-}
-
-/** Тело PUT characteristic-trash: смена вида отхода (код и наименование из MagazinTrash). */
-function characteristicTrashPutBodySwapMagazin(
-  existing: Record<string, unknown>,
-  idObjectPlaceTrash: number,
-  newMagazinId: number
-): Record<string, unknown> {
-  const st = existing.id_state ?? existing.idState;
-  let stateId: number | undefined;
-  if (typeof st === "number") stateId = st;
-  else if (st && typeof st === "object") {
-    const o = st as Record<string, unknown>;
-    stateId =
-      getNestedId(st, "id_state") ??
-      (typeof o.idState === "number" ? o.idState : undefined);
-  }
-  const w = existing.weight_for_year ?? existing.weightForYear ?? 0;
-  const sq = existing.square_for_year ?? existing.squareForYear ?? 0;
-  return {
-    idObjectPlaceTrash,
-    idMagazinTrash: newMagazinId,
-    idState: stateId,
-    weightForYear: typeof w === "number" && Number.isFinite(w) ? w : 0,
-    squareForYear: typeof sq === "number" && Number.isFinite(sq) ? sq : 0,
-  };
 }
 
 /** Код и наименование отхода из CharacteristicTrash + MagazinTrash (реестр — поле register в ObjectPlaceTrash). */
@@ -305,7 +291,7 @@ function mergeCharacteristicsIntoObjectRows(
 function getObjectCellValue(row: Record<string, unknown>, key: string): string {
   switch (key) {
     case "__region":
-      return formatGroupPlace(row.id_group_place_save);
+      return formatGroupPlace(row.id_region);
     case "__city":
       return formatCity(row.id_cities);
     case "__group":
@@ -314,8 +300,6 @@ function getObjectCellValue(row: Record<string, unknown>, key: string): string {
       return formatStorage(row.id_storage_scheme);
     case "__degree":
       return formatDegree(row.id_gruops_degree);
-    case "__comments":
-      return formatComment(row.id_comments_of_place);
     case "__phones":
       return formatPhones(row);
     case "__around":
@@ -838,9 +822,11 @@ function ReferenceModal(props: {
   kind: RefKind;
   rows: Record<string, unknown>[];
   regions: Record<string, unknown>[];
+  selectedRows?: Record<string, unknown>[];
   onClose: () => void;
   onPick: (id: number) => void;
   onClear: () => void;
+  onDeleteSelected?: (id: number) => void;
   onCreate: (created: Record<string, unknown>) => void;
   showToast: (msg: string) => void;
 }) {
@@ -848,6 +834,7 @@ function ReferenceModal(props: {
   const [newVal, setNewVal] = useState("");
   const [cityIndex, setCityIndex] = useState("");
   const [cityDistrict, setCityDistrict] = useState("");
+  const [cityName, setCityName] = useState("");
   const [cityRegionId, setCityRegionId] = useState<number>(() => {
     const r = props.regions[0];
     return r && typeof r.id_region === "number" ? r.id_region : 1;
@@ -856,19 +843,19 @@ function ReferenceModal(props: {
   const idKey =
     props.kind === "cities"
       ? "id_cities"
+      : props.kind === "region"
+        ? "id_region"
       : props.kind === "group"
         ? "id_group_place_save"
         : props.kind === "storage"
           ? "id_storage_scheme"
           : props.kind === "degree"
             ? "id_gruops_degree"
-            : props.kind === "comments"
-              ? "id_comments_of_place"
-              : "id_magazin_trash";
+            : "id_magazin_trash";
 
   const add = async () => {
     try {
-      if (props.kind === "magazin") return;
+      if (props.kind === "magazin" || props.kind === "region") return;
       if (props.kind === "group") {
         const created = await apiPost<Record<string, unknown>>(cfg.path, {
           nameRegion: newVal.trim(),
@@ -898,18 +885,11 @@ function ReferenceModal(props: {
         props.onPick(Number(created.id_gruops_degree));
         return;
       }
-      if (props.kind === "comments") {
-        const created = await apiPost<Record<string, unknown>>(cfg.path, {
-          comments: newVal.trim(),
-        });
-        props.onCreate(created);
-        props.showToast("Комментарий добавлен");
-        props.onPick(Number(created.id_comments_of_place));
-        return;
-      }
       if (props.kind === "cities") {
         const created = await apiPost<Record<string, unknown>>(cfg.path, {
           idRegion: cityRegionId,
+          nameCities: cityName.trim() || "Новый город",
+          name_cities: cityName.trim() || "Новый город",
           index: cityIndex.trim(),
           district: cityDistrict.trim(),
         });
@@ -949,10 +929,49 @@ function ReferenceModal(props: {
               Сбросить связь
             </button>
           </div>
-          {props.kind !== "magazin" && (
+          {props.kind === "magazin" && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Уже выбрано</div>
+              {props.selectedRows && props.selectedRows.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {props.selectedRows.map((item) => (
+                    <div
+                      key={`sel-${str(item[idKey])}`}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        border: "1px solid #e4e4e7",
+                        borderRadius: 8,
+                        padding: "6px 8px",
+                      }}
+                    >
+                      <span>{cfg.display(item)}</span>
+                      <button
+                        type="button"
+                        className="btn-small"
+                        onClick={() => props.onDeleteSelected?.(Number(item[idKey]))}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: "#6b7280" }}>Пока не выбрано</div>
+              )}
+            </div>
+          )}
+          {props.kind !== "magazin" && props.kind !== "region" && (
             <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
               {props.kind === "cities" ? (
                 <>
+                  <input
+                    className="cell-input-minimal"
+                    placeholder="Город"
+                    value={cityName}
+                    onChange={(e) => setCityName(e.target.value)}
+                  />
                   <input
                     className="cell-input-minimal"
                     placeholder="Индекс"
@@ -1003,6 +1022,7 @@ function ReferenceModal(props: {
                   <th>{cfg.primaryHeader}</th>
                   {props.kind === "cities" && (
                     <>
+                      <th>Область</th>
                       <th>Индекс</th>
                       <th>Район</th>
                     </>
@@ -1012,7 +1032,7 @@ function ReferenceModal(props: {
               <tbody>
                 {props.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={props.kind === "cities" ? 3 : 1}>Нет данных</td>
+                    <td colSpan={props.kind === "cities" ? 4 : 1}>Нет данных</td>
                   </tr>
                 ) : (
                   props.rows.map((item) => (
@@ -1023,6 +1043,12 @@ function ReferenceModal(props: {
                       <td>{cfg.display(item)}</td>
                       {props.kind === "cities" && (
                         <>
+                          <td style={{ color: "#64748b" }}>
+                            {str(
+                              (item.id_region as Record<string, unknown> | undefined)
+                                ?.name_region
+                            )}
+                          </td>
                           <td style={{ color: "#64748b" }}>{str(item.index)}</td>
                           <td style={{ color: "#64748b" }}>{str(item.district)}</td>
                         </>
@@ -1131,16 +1157,17 @@ export default function App() {
 
   const [refCache, setRefCache] = useState<Record<RefKind, Record<string, unknown>[]>>({
     cities: [],
+    region: [],
     group: [],
     storage: [],
     degree: [],
-    comments: [],
     magazin: [],
   });
   const [gridRefLists, setGridRefLists] = useState<
     Record<GridRefKind, Record<string, unknown>[]>
   >({
     classDanger: [],
+    region: [],
     typeTrash1: [],
     levelTrash: [],
     nameGroup: [],
@@ -1210,7 +1237,6 @@ export default function App() {
         group,
         storage,
         degree,
-        comments,
         regions,
         magazin,
         classDanger,
@@ -1224,7 +1250,6 @@ export default function App() {
         apiGet<Record<string, unknown>[]>("/api/group-place-save"),
         apiGet<Record<string, unknown>[]>("/api/storage-scheme"),
         apiGet<Record<string, unknown>[]>("/api/gruops-degree"),
-        apiGet<Record<string, unknown>[]>("/api/comments-of-place"),
         apiGet<Record<string, unknown>[]>("/api/region"),
         apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
         apiGet<Record<string, unknown>[]>("/api/classDanger"),
@@ -1234,9 +1259,10 @@ export default function App() {
         apiGet<Record<string, unknown>[]>("/api/object-place-trash"),
         apiGet<Record<string, unknown>[]>("/api/physical-state"),
       ]);
-      setRefCache({ cities, group, storage, degree, comments, magazin });
+      setRefCache({ cities, region: regions, group, storage, degree, magazin });
       setGridRefLists({
         classDanger,
+        region: regions,
         typeTrash1,
         levelTrash,
         nameGroup,
@@ -1270,7 +1296,7 @@ export default function App() {
     }
   }, []);
 
-  /** Выбор отхода из MagazinTrash → обновление CharacteristicTrash (код и наименование вместе). */
+  /** Выбор отхода из MagazinTrash → добавление связи CharacteristicTrash (объект может иметь несколько отходов). */
   const pickMagazinForObject = useCallback(
     async (rowIndex: number, magazinId: number) => {
       const row = rows[rowIndex];
@@ -1279,40 +1305,33 @@ export default function App() {
       const chars = characteristicTrashList.filter(
         (c) => characteristicObjectPlaceId(c) === oid
       );
-      if (chars.length > 1) {
-        showToast(
-          "Несколько характеристик на объекте — укажите отход в таблице CharacteristicTrash"
-        );
-        return;
-      }
       try {
-        if (chars.length === 0) {
-          const states = await apiGet<Record<string, unknown>[]>("/api/physical-state");
-          const first = states?.[0] as Record<string, unknown> | undefined;
-          const sid =
-            typeof first?.id_state === "number"
-              ? first.id_state
-              : typeof first?.idState === "number"
-                ? first.idState
-                : undefined;
-          if (sid === undefined) {
-            showToast("Нет записей в справочнике PhysicalState");
-            return;
-          }
-          await apiPost("/api/characteristic-trash", {
-            idObjectPlaceTrash: oid,
-            idMagazinTrash: magazinId,
-            idState: sid,
-            weightForYear: 0,
-            squareForYear: 0,
-          });
-        } else {
-          const c = chars[0];
-          const charId = characteristicTrashRowId(c);
-          if (charId === undefined) return;
-          const body = characteristicTrashPutBodySwapMagazin(c, oid, magazinId);
-          await apiPut(`/api/characteristic-trash/${charId}`, body);
+        const hasLink = chars.some((c) => {
+          return characteristicMagazinId(c) === magazinId;
+        });
+        if (hasLink) {
+          showToast("Этот отход уже привязан к объекту");
+          return;
         }
+        const states = await apiGet<Record<string, unknown>[]>("/api/physical-state");
+        const first = states?.[0] as Record<string, unknown> | undefined;
+        const sid =
+          typeof first?.id_state === "number"
+            ? first.id_state
+            : typeof first?.idState === "number"
+              ? first.idState
+              : undefined;
+        if (sid === undefined) {
+          showToast("Нет записей в справочнике PhysicalState");
+          return;
+        }
+        await apiPost("/api/characteristic-trash", {
+          idObjectPlaceTrash: oid,
+          idMagazinTrash: magazinId,
+          idState: sid,
+          weightForYear: 0,
+          squareForYear: 0,
+        });
         await refreshCharacteristicTrashList();
         setEditingRef(null);
         showToast("Сохранено");
@@ -1716,6 +1735,22 @@ export default function App() {
       await pickMagazinForObject(rowIndex, id);
       return;
     }
+    if (kind === "cities") {
+      const city = refCache.cities.find((c) => Number(c.id_cities) === id);
+      const reg = city?.id_region;
+      const regionId =
+        typeof reg === "number"
+          ? reg
+          : reg && typeof reg === "object"
+            ? getNestedId(reg, "id_region") ??
+              ((reg as Record<string, unknown>).idRegion as number | undefined)
+            : undefined;
+      await saveObjectPatch(rowIndex, {
+        citiesId: id,
+        ...(typeof regionId === "number" ? { regionId } : {}),
+      });
+      return;
+    }
     const patchKey = REF_CONFIG[kind].patchKey;
     await saveObjectPatch(rowIndex, { [patchKey]: id });
   };
@@ -1727,9 +1762,45 @@ export default function App() {
       setEditingRef(null);
       return;
     }
+    if (kind === "cities") {
+      await saveObjectPatch(
+        rowIndex,
+        { citiesId: FK_CLEAR, regionId: FK_CLEAR } as Record<string, unknown>
+      );
+      setEditingRef(null);
+      return;
+    }
     const patchKey = REF_CONFIG[kind].patchKey;
     await saveObjectPatch(rowIndex, { [patchKey]: FK_CLEAR } as Record<string, unknown>);
     setEditingRef(null);
+  };
+
+  const unlinkMagazinFromObject = async (rowIndex: number, magazinId: number) => {
+    const row = rows[rowIndex];
+    if (!row || typeof row.id_object_place_trash !== "number") return;
+    const oid = row.id_object_place_trash;
+    try {
+      const links = characteristicTrashList.filter(
+        (c) =>
+          characteristicObjectPlaceId(c) === oid && characteristicMagazinId(c) === magazinId
+      );
+      if (links.length === 0) {
+        showToast("Связь не найдена");
+        return;
+      }
+      await Promise.all(
+        links.map(async (c) => {
+          const cid = characteristicTrashRowId(c);
+          if (typeof cid === "number") {
+            await apiDelete(`/api/characteristic-trash/${cid}`);
+          }
+        })
+      );
+      await refreshCharacteristicTrashList();
+      showToast("Удалено");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка удаления");
+    }
   };
 
   const deleteRow = async (s: SectionId, row: Record<string, unknown>) => {
@@ -1974,9 +2045,6 @@ export default function App() {
           ))}
         </nav>
         <div className="info-note" style={{ margin: "12px" }}>
-          Поиск по строке и сортировка по столбцу. Ширину столбца меняйте перетаскиванием правого края заголовка.
-          <br />
-          <br />
           <a
             className="toolbar-link"
             href="/api/reports/waste/export/csv"
@@ -1984,6 +2052,15 @@ export default function App() {
             rel="noreferrer"
           >
             Экспорт отчёта CSV
+          </a>
+          <br />
+          <a
+            className="toolbar-link"
+            href="/api/reports/waste/detailed/export/pdf"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Экспорт отчёта PDF
           </a>
         </div>
       </aside>
@@ -2094,7 +2171,57 @@ export default function App() {
                             const cw = getColWidth(col.key);
                             if (col.ref) {
                               const rk = col.ref;
-                              const val = getObjectCellValue(row, col.key);
+                              const val =
+                                rk === "region"
+                                  ? (() => {
+                                      const raw =
+                                        row.id_region ??
+                                        (row.id_cities &&
+                                        typeof row.id_cities === "object"
+                                          ? (row.id_cities as Record<string, unknown>).id_region
+                                          : undefined);
+                                      if (raw && typeof raw === "object")
+                                        return REF_CONFIG.region.display(
+                                          raw as Record<string, unknown>
+                                        );
+                                      const rid =
+                                        typeof raw === "number"
+                                          ? raw
+                                          : getNestedId(raw, "id_region") ??
+                                            getNestedId(raw, "idRegion");
+                                      if (typeof rid === "number") {
+                                        const found = refCache.region.find(
+                                          (r) => getNestedId(r, "id_region") === rid
+                                        );
+                                        if (found) return REF_CONFIG.region.display(found);
+                                      }
+                                      const cityRaw = row.id_cities;
+                                      const cityId =
+                                        typeof cityRaw === "number"
+                                          ? cityRaw
+                                          : cityRaw && typeof cityRaw === "object"
+                                            ? getNestedId(cityRaw, "id_cities") ??
+                                              getNestedId(cityRaw, "idCities")
+                                            : undefined;
+                                      if (typeof cityId === "number") {
+                                        const city = refCache.cities.find(
+                                          (c) => getNestedId(c, "id_cities") === cityId
+                                        );
+                                        const cityRegion =
+                                          city &&
+                                          (typeof city.id_region === "number"
+                                            ? city.id_region
+                                            : getNestedId(city.id_region, "id_region"));
+                                        if (typeof cityRegion === "number") {
+                                          const found = refCache.region.find(
+                                            (r) => getNestedId(r, "id_region") === cityRegion
+                                          );
+                                          if (found) return REF_CONFIG.region.display(found);
+                                        }
+                                      }
+                                      return "";
+                                    })()
+                                  : getObjectCellValue(row, col.key);
                               const sug = refCache[rk].filter((r) =>
                                 REF_CONFIG[rk]
                                   .display(r)
@@ -2162,15 +2289,15 @@ export default function App() {
                                             const idKey =
                                               rk === "cities"
                                                 ? "id_cities"
+                                                : rk === "region"
+                                                  ? "id_region"
                                                 : rk === "group"
                                                   ? "id_group_place_save"
                                                   : rk === "storage"
                                                     ? "id_storage_scheme"
                                                     : rk === "degree"
                                                       ? "id_gruops_degree"
-                                                      : rk === "comments"
-                                                        ? "id_comments_of_place"
-                                                        : "id_magazin_trash";
+                                                      : "id_magazin_trash";
                                             return (
                                               <div
                                                 key={str(s[idKey])}
@@ -2220,9 +2347,18 @@ export default function App() {
                                           <span className="cell-placeholder">[выбрать]</span>
                                         )}
                                       </span>
-                                      <span className="cell-ref-action" title="Справочник" aria-hidden>
+                                      <button
+                                        type="button"
+                                        className="cell-ref-action table-icon-btn"
+                                        title="Открыть справочник"
+                                        aria-label="Открыть справочник"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openRefModal(rk, idx, col.key);
+                                        }}
+                                      >
                                         <IconPencil />
-                                      </span>
+                                      </button>
                                     </div>
                                   )}
                                 </td>
@@ -2298,9 +2434,18 @@ export default function App() {
                                           <span className="cell-placeholder">[выбрать]</span>
                                         )}
                                       </span>
-                                      <span className="cell-ref-action" title="Список телефонов" aria-hidden>
+                                      <button
+                                        type="button"
+                                        className="cell-ref-action table-icon-btn"
+                                        title="Список телефонов"
+                                        aria-label="Список телефонов"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setPhoneModalRowIndex(idx);
+                                        }}
+                                      >
                                         <IconPencil />
-                                      </span>
+                                      </button>
                                     </div>
                                   )}
                                 </td>
@@ -2392,9 +2537,20 @@ export default function App() {
                                           <span className="cell-placeholder">[добавить]</span>
                                         )}
                                       </span>
-                                      <span className="cell-ref-action" title="Список" aria-hidden>
+                                      <button
+                                        type="button"
+                                        className="cell-ref-action table-icon-btn"
+                                        title="Список"
+                                        aria-label="Список"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setRelationModal({ kind, rowIndex: idx });
+                                          void loadObjectRelation(idx, kind);
+                                          void loadGlobalRelationLists();
+                                        }}
+                                      >
                                         <IconPencil />
-                                      </span>
+                                      </button>
                                     </div>
                                   )}
                                 </td>
@@ -2640,9 +2796,23 @@ export default function App() {
                                           <span className="cell-placeholder">[выбрать]</span>
                                         )}
                                       </span>
-                                      <span className="cell-ref-action" title="Справочник" aria-hidden>
+                                      <button
+                                        type="button"
+                                        className="cell-ref-action table-icon-btn"
+                                        title="Открыть справочник"
+                                        aria-label="Открыть справочник"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setGridRefModal({
+                                            kind: gk,
+                                            rowIndex: idx,
+                                            colKey: col.key,
+                                            section: sid,
+                                          });
+                                        }}
+                                      >
                                         <IconPencil />
-                                      </span>
+                                      </button>
                                     </div>
                                   )}
                                 </td>
@@ -2775,9 +2945,37 @@ export default function App() {
           kind={refModal.kind}
           rows={refCache[refModal.kind]}
           regions={regionsList}
+          selectedRows={
+            refModal.kind === "magazin" &&
+            rows[refModal.rowIndex] &&
+            typeof rows[refModal.rowIndex].id_object_place_trash === "number"
+              ? (() => {
+                  const oid = rows[refModal.rowIndex].id_object_place_trash as number;
+                  const ids = new Set<number>();
+                  const selected: Record<string, unknown>[] = [];
+                  for (const c of characteristicTrashList) {
+                    if (characteristicObjectPlaceId(c) !== oid) continue;
+                    const mid = characteristicMagazinId(c);
+                    if (typeof mid !== "number" || ids.has(mid)) continue;
+                    ids.add(mid);
+                    const nested = magazinFromCharacteristic(c);
+                    if (nested) {
+                      selected.push(nested);
+                      continue;
+                    }
+                    const fromCache = refCache.magazin.find(
+                      (m) => getNestedId(m, "id_magazin_trash") === mid
+                    );
+                    if (fromCache) selected.push(fromCache);
+                  }
+                  return selected;
+                })()
+              : []
+          }
           onClose={() => setRefModal(null)}
           onPick={(id) => void pickRef(refModal.kind, refModal.rowIndex, id)}
           onClear={() => void clearRef(refModal.kind, refModal.rowIndex)}
+          onDeleteSelected={(id) => void unlinkMagazinFromObject(refModal.rowIndex, id)}
           onCreate={(created) => mergeRefIntoCache(refModal.kind, created)}
           showToast={showToast}
         />
