@@ -1100,8 +1100,14 @@ export default function App() {
   );
 
   const getColWidth = useCallback(
-    (colKey: string) => colWidths[widthStorageKey(colKey)] ?? DEFAULT_COL_WIDTH,
-    [colWidths, widthStorageKey]
+    (colKey: string) => {
+      if (section === "group-place-save" && colKey === "name_group") {
+        // Держим колонку широкой, но в пределах видимой области (чтобы кнопка удаления не уезжала).
+        return Math.max(420, window.innerWidth - 560);
+      }
+      return colWidths[widthStorageKey(colKey)] ?? DEFAULT_COL_WIDTH;
+    },
+    [colWidths, section, widthStorageKey]
   );
 
   const colWidthsRef = useRef(colWidths);
@@ -2861,6 +2867,30 @@ export default function App() {
                                     <option value="Да">Да</option>
                                     <option value="Нет">Нет</option>
                                   </select>
+                                </td>
+                              );
+                            }
+                            if (sid === "group-place-save" && col.key === "name_group") {
+                              const defVal = gridInputDefault(row, col);
+                              return (
+                                <td
+                                  key={col.key}
+                                  className={autoFill ? "cell-auto-filled" : undefined}
+                                  style={{ width: gcw, minWidth: 420 }}
+                                >
+                                  <textarea
+                                    key={`${str(row[idf])}-${col.key}-${defVal}`}
+                                    className="cell-textarea"
+                                    defaultValue={defVal}
+                                    rows={2}
+                                    onBlur={(e) => {
+                                      const next = {
+                                        ...row,
+                                        [col.key]: parseGridInput(e.target.value, col, row),
+                                      };
+                                      void saveGridRow(next, idx, sid);
+                                    }}
+                                  />
                                 </td>
                               );
                             }
