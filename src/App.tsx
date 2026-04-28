@@ -1101,16 +1101,9 @@ export default function App() {
 
   const getColWidth = useCallback(
     (colKey: string) => {
-      if (
-        isGridSection(section) &&
-        getGridDef(section).columns.length === 1
-      ) {
-        // Для таблиц с одним столбцом растягиваем поле почти до кнопки "Удалить".
-        return Math.max(420, window.innerWidth - 560);
-      }
       return colWidths[widthStorageKey(colKey)] ?? DEFAULT_COL_WIDTH;
     },
-    [colWidths, section, widthStorageKey]
+    [colWidths, widthStorageKey]
   );
 
   const colWidthsRef = useRef(colWidths);
@@ -2884,7 +2877,7 @@ export default function App() {
                                 <td
                                   key={col.key}
                                   className={autoFill ? "cell-auto-filled" : undefined}
-                                  style={{ width: gcw, minWidth: 420 }}
+                                  style={{ width: gcw, minWidth: 64 }}
                                 >
                                   <textarea
                                     key={`${str(row[idf])}-${col.key}-${defVal}`}
