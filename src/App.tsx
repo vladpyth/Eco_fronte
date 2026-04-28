@@ -186,13 +186,46 @@ function ObjectCellTextarea({
   );
 }
 
-function formatPhones(row: Record<string, unknown>): string {
+type PhoneKind = "legal" | "owner";
+
+function phoneKindMatches(rec: Record<string, unknown>, kind: PhoneKind): boolean {
+  const raw = rec.ur_ob;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return false;
+  if (n === 3) return true;
+  return kind === "legal" ? n === 0 : n === 1;
+}
+
+function formatPhonesByKind(row: Record<string, unknown>, kind: PhoneKind): string {
   const p = row.phones;
   if (!Array.isArray(p) || p.length === 0) return "";
   return p
-    .map((x) => (x && typeof x === "object" ? str((x as Record<string, unknown>).number) : ""))
+    .filter((x) => x && typeof x === "object" && phoneKindMatches(x as Record<string, unknown>, kind))
+    .map((x) => str((x as Record<string, unknown>).number))
     .filter(Boolean)
     .join(", ");
+}
+
+function resolvePhoneStatusForNumber(
+  row: Record<string, unknown>,
+  phoneNumber: string,
+  targetKind: PhoneKind
+): 0 | 1 | 3 {
+  const normalized = phoneNumber.trim();
+  if (!normalized) return targetKind === "legal" ? 0 : 1;
+  const phones = Array.isArray(row.phones) ? row.phones : [];
+  const hasLegal = phones.some((p) => {
+    if (!p || typeof p !== "object") return false;
+    const rec = p as Record<string, unknown>;
+    return String(rec.number ?? "").trim() === normalized && phoneKindMatches(rec, "legal");
+  });
+  const hasOwner = phones.some((p) => {
+    if (!p || typeof p !== "object") return false;
+    const rec = p as Record<string, unknown>;
+    return String(rec.number ?? "").trim() === normalized && phoneKindMatches(rec, "owner");
+  });
+  if ((targetKind === "legal" && hasOwner) || (targetKind === "owner" && hasLegal)) return 3;
+  return targetKind === "legal" ? 0 : 1;
 }
 
 function formatNameList(row: Record<string, unknown>, keyCandidates: string[]): string {
@@ -301,7 +334,9 @@ function getObjectCellValue(row: Record<string, unknown>, key: string): string {
     case "__degree":
       return formatDegree(row.id_gruops_degree);
     case "__phones":
-      return formatPhones(row);
+      return formatPhonesByKind(row, "legal");
+    case "__phones_owner":
+      return formatPhonesByKind(row, "owner");
     case "__around":
       return formatNameList(row, ["aroundBuilds", "around_builds", "aroundBuildList"]);
     case "__natural":
@@ -415,6 +450,7 @@ function parseGridInput(
 
 function PhoneModal(props: {
   row: Record<string, unknown>;
+  phoneKind: PhoneKind;
   allPhones: Record<string, unknown>[];
   onClose: () => void;
   onRefresh: () => Promise<void>;
@@ -422,7 +458,11 @@ function PhoneModal(props: {
   onLinkExisting: (phoneId: number, numberValue: string) => Promise<void>;
   showToast: (msg: string) => void;
 }) {
-  const phones = Array.isArray(props.row.phones) ? props.row.phones : [];
+  const phones = Array.isArray(props.row.phones)
+    ? props.row.phones.filter(
+        (p) => p && typeof p === "object" && phoneKindMatches(p as Record<string, unknown>, props.phoneKind)
+      )
+    : [];
   const linkedIds = new Set(
     phones
       .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>).id_phone_number : null))
@@ -433,8 +473,9 @@ function PhoneModal(props: {
 
   const remove = async (id: number) => {
     try {
-      await apiDelete(`/api/number-phone/${id}`);
-      props.showToast("Удалено");
+      if (typeof oid !== "number") return;
+      await apiDelete(`/api/object-place-trash/${oid}/number-phone/${id}`);
+      props.showToast("Номер отвязан от объекта");
       await props.onRefresh();
       await props.onRefreshAll();
     } catch (e) {
@@ -449,6 +490,7 @@ function PhoneModal(props: {
       await apiPost("/api/number-phone", {
         idObjectPlaceTrash: oid,
         number: t,
+        ur_ob: resolvePhoneStatusForNumber(props.row, t, props.phoneKind),
       });
       setDraft("");
       props.showToast("Добавлено");
@@ -468,7 +510,7 @@ function PhoneModal(props: {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <span>Телефоны объекта</span>
+          <span>{props.phoneKind === "legal" ? "Телефон юр. лица" : "Телефон собственника"}</span>
           <button
             type="button"
             className="clear-filters"
@@ -525,7 +567,7 @@ function PhoneModal(props: {
                           className="btn-small"
                           onClick={() => typeof id === "number" && void remove(id)}
                         >
-                          Удалить
+                          Отвязать
                         </button>
                       </td>
                     </tr>
@@ -1212,7 +1254,7 @@ export default function App() {
     filter: string;
   } | null>(null);
 
-  const [phoneModalRowIndex, setPhoneModalRowIndex] = useState<number | null>(null);
+  const [phoneModal, setPhoneModal] = useState<{ rowIndex: number; kind: PhoneKind } | null>(null);
   const [editingRelation, setEditingRelation] = useState<{
     kind: ObjectRelationKind;
     rowIndex: number;
@@ -1535,6 +1577,7 @@ export default function App() {
         await apiPost("/api/number-phone", {
           idObjectPlaceTrash: id,
           number: trimmed,
+          ur_ob: resolvePhoneStatusForNumber(row, trimmed, "owner"),
         });
         await refreshObjectRow(id);
         await loadAllPhones();
@@ -1549,7 +1592,7 @@ export default function App() {
   );
 
   const linkExistingPhoneToObject = useCallback(
-    async (rowIndex: number, phoneId: number, numberValue: string) => {
+    async (rowIndex: number, phoneId: number, numberValue: string, kind: PhoneKind) => {
       const row = rows[rowIndex];
       if (!row || typeof row.id_object_place_trash !== "number") return;
       const objectId = row.id_object_place_trash;
@@ -1557,6 +1600,7 @@ export default function App() {
         await apiPut(`/api/number-phone/${phoneId}`, {
           idObjectPlaceTrash: objectId,
           number: numberValue,
+          ur_ob: resolvePhoneStatusForNumber(row, numberValue, kind),
         });
         await refreshObjectRow(objectId);
         await loadAllPhones();
@@ -2366,8 +2410,10 @@ export default function App() {
                                 </td>
                               );
                             }
-                            if (col.key === "__phones") {
+                            if (col.key === "__phones" || col.key === "__phones_owner") {
                               const v = getObjectCellValue(row, col.key);
+                              const phoneKind: PhoneKind =
+                                col.key === "__phones" ? "legal" : "owner";
                               const editingPh =
                                 editingPhone?.rowIndex === idx ? editingPhone : null;
                               return (
@@ -2407,7 +2453,7 @@ export default function App() {
                                         aria-label="Список телефонов"
                                         onMouseDown={(e) => e.preventDefault()}
                                         onClick={() => {
-                                          setPhoneModalRowIndex(idx);
+                                          setPhoneModal({ rowIndex: idx, kind: phoneKind });
                                           setEditingPhone(null);
                                         }}
                                       >
@@ -2443,7 +2489,7 @@ export default function App() {
                                         aria-label="Список телефонов"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setPhoneModalRowIndex(idx);
+                                          setPhoneModal({ rowIndex: idx, kind: phoneKind });
                                         }}
                                       >
                                         <IconPencil />
@@ -3038,21 +3084,27 @@ export default function App() {
         />
       )}
 
-      {phoneModalRowIndex !== null &&
-        rows[phoneModalRowIndex] &&
-        typeof rows[phoneModalRowIndex].id_object_place_trash === "number" && (
+      {phoneModal !== null &&
+        rows[phoneModal.rowIndex] &&
+        typeof rows[phoneModal.rowIndex].id_object_place_trash === "number" && (
           <PhoneModal
-            row={rows[phoneModalRowIndex]}
+            row={rows[phoneModal.rowIndex]}
+            phoneKind={phoneModal.kind}
             allPhones={allPhones}
-            onClose={() => setPhoneModalRowIndex(null)}
+            onClose={() => setPhoneModal(null)}
             onRefresh={async () => {
-              const r = rows[phoneModalRowIndex];
+              const r = rows[phoneModal.rowIndex];
               const id = r?.id_object_place_trash;
               if (typeof id === "number") await refreshObjectRow(id);
             }}
             onRefreshAll={loadAllPhones}
             onLinkExisting={async (phoneId, numberValue) => {
-              await linkExistingPhoneToObject(phoneModalRowIndex, phoneId, numberValue);
+              await linkExistingPhoneToObject(
+                phoneModal.rowIndex,
+                phoneId,
+                numberValue,
+                phoneModal.kind
+              );
             }}
             showToast={showToast}
           />

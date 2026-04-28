@@ -435,19 +435,30 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     idField: "id_phone_number",
     title: "Телефоны (NumberPhone)",
     sidebar: "Телефоны",
-    columns: [
-      { key: "number", label: "Номер", type: "text" },
-      { key: "id_object_place_trash", label: "ID объекта размещения", type: "number" },
-    ],
-    toRequest: (row) => ({
-      idObjectPlaceTrash: pickFk(row.id_object_place_trash, "id_object_place_trash"),
-      number: S(row.number),
-    }),
+    columns: [{ key: "number", label: "Номер", type: "text" }],
+    toRequest: (row) => {
+      const raw = row.id_object_place_trash;
+      let idObjectPlaceTrash: number | undefined;
+      if (typeof raw === "number" && raw > 0) idObjectPlaceTrash = raw;
+      else if (raw && typeof raw === "object") {
+        const id = getNestedId(raw as Record<string, unknown>, "id_object_place_trash");
+        if (typeof id === "number" && id > 0) idObjectPlaceTrash = id;
+      }
+      const ur =
+        typeof row.ur_ob === "number" && Number.isFinite(row.ur_ob) ? row.ur_ob : 0;
+      const body: Record<string, unknown> = {
+        number: S(row.number),
+        ur_ob: ur,
+      };
+      if (idObjectPlaceTrash != null) body.idObjectPlaceTrash = idObjectPlaceTrash;
+      return body;
+    },
     createDefault: async () => {
       const objs = await apiGet<Record<string, unknown>[]>("/api/object-place-trash");
       return {
         idObjectPlaceTrash: pickFk(objs[0], "id_object_place_trash"),
         number: "+70000000000",
+        ur_ob: 0,
       };
     },
   },
