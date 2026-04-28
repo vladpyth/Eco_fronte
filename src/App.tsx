@@ -1101,8 +1101,11 @@ export default function App() {
 
   const getColWidth = useCallback(
     (colKey: string) => {
-      if (section === "group-place-save" && colKey === "name_group") {
-        // Держим колонку широкой, но в пределах видимой области (чтобы кнопка удаления не уезжала).
+      if (
+        isGridSection(section) &&
+        getGridDef(section).columns.length === 1
+      ) {
+        // Для таблиц с одним столбцом растягиваем поле почти до кнопки "Удалить".
         return Math.max(420, window.innerWidth - 560);
       }
       return colWidths[widthStorageKey(colKey)] ?? DEFAULT_COL_WIDTH;
@@ -2870,7 +2873,12 @@ export default function App() {
                                 </td>
                               );
                             }
-                            if (sid === "group-place-save" && col.key === "name_group") {
+                            if (
+                              gridColumns.length === 1 &&
+                              !col.gridRef &&
+                              !col.readOnly &&
+                              !col.format
+                            ) {
                               const defVal = gridInputDefault(row, col);
                               return (
                                 <td
