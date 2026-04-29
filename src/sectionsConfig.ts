@@ -7,6 +7,7 @@ export type GridSectionId =
   | "around-build"
   | "characteristic-trash"
   | "cities"
+  | "district"
   | "classDanger"
   | "cleaner-builds"
   | "group-place-save"
@@ -226,6 +227,15 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     toRequest: (row) => ({ nameRegion: S(row.name_region) }),
     createDefault: async () => ({ nameRegion: "Новый регион" }),
   },
+  district: {
+    apiPath: "/api/district",
+    idField: "id_district",
+    title: "Районы (District)",
+    sidebar: "Районы",
+    columns: [{ key: "name_district", label: "Название района", type: "text" }],
+    toRequest: (row) => ({ name_district: S(row.name_district) }),
+    createDefault: async () => ({ name_district: "Новый район" }),
+  },
   cities: {
     apiPath: "/api/cities",
     idField: "id_cities",
@@ -234,7 +244,7 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     columns: [
       { key: "name_cities", label: "Город", type: "text" },
       { key: "index", label: "Индекс", type: "text" },
-      { key: "district", label: "Район", type: "text" },
+      { key: "id_district", label: "Район", gridRef: "district" },
       { key: "id_region", label: "Область", gridRef: "region" },
     ],
     toRequest: (row) => {
@@ -246,24 +256,31 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       const cityName = S(row.name_cities).trim();
       return {
         idRegion,
+        idDistrict: pickFk(row.id_district, "id_district"),
         nameCities: cityName || "Новый город",
         name_cities: cityName || "Новый город",
         index: S(row.index),
-        district: S(row.district),
       };
     },
     createDefault: async () => {
-      const regions = await apiGet<Record<string, unknown>[]>("/api/region");
+      const [regions, districts] = await Promise.all([
+        apiGet<Record<string, unknown>[]>("/api/region"),
+        apiGet<Record<string, unknown>[]>("/api/district"),
+      ]);
       const rid =
         regions[0] && typeof regions[0].id_region === "number"
           ? regions[0].id_region
           : 1;
+      const did =
+        districts[0] && typeof districts[0].id_district === "number"
+          ? districts[0].id_district
+          : 1;
       return {
         idRegion: rid,
+        idDistrict: did,
         nameCities: "Новый город",
         name_cities: "Новый город",
         index: "000000",
-        district: "Район",
       };
     },
   },
@@ -475,6 +492,7 @@ export const GRID_SECTION_ORDER: GridSectionId[] = [
   "name-group",
   "physical-state",
   "region",
+  "district",
   "cities",
   "group-place-save",
   "storage-scheme",

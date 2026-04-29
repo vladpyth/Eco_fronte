@@ -221,6 +221,7 @@ export function objectPlaceTrashToRequest(
     startUse: startUseFromPatchOrRow(patch, o),
     serviseLife: optStr(patch, o, "servise_life"),
     companyLocated: optStr(patch, o, "company_located"),
+    payer_indentification_number: optStr(patch, o, "payer_indentification_number"),
     placeObj: optStr(patch, o, "place_obj"),
     project: optStr(patch, o, "project"),
     stateExpertize:
@@ -266,7 +267,8 @@ export function objectPlaceTrashToRequest(
 export function formatCity(c: unknown): string {
   if (!c || typeof c !== "object") return "";
   const o = c as Record<string, unknown>;
-  return `${strOrEmpty(o.index)} ${strOrEmpty(o.district)}`.trim();
+  const district = o.id_district as Record<string, unknown> | undefined;
+  return strOrEmpty(district?.name_district);
 }
 
 export function formatGroupPlace(g: unknown): string {

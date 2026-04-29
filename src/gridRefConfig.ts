@@ -5,6 +5,7 @@
 
 export type GridRefKind =
   | "classDanger"
+  | "district"
   | "region"
   | "typeTrash1"
   | "levelTrash"
@@ -27,6 +28,19 @@ export const GRID_REF_SPECS: Record<
     quickCreateFromInput: (raw: string) => Record<string, unknown>;
   }
 > = {
+  district: {
+    apiPath: "/api/district",
+    idField: "id_district",
+    display: (r) => String(r.name_district ?? ""),
+    modalTitle: "Район",
+    primaryHeader: "Название района",
+    placeholder: "Новый район",
+    quickCreateFromInput: (raw) => {
+      const t = raw.trim();
+      if (!t) throw new Error("Введите название");
+      return { name_district: t };
+    },
+  },
   classDanger: {
     apiPath: "/api/classDanger",
     idField: "id_class_danger",

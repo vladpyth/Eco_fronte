@@ -94,7 +94,7 @@ const REF_CONFIG: Record<
     title: "Города",
     path: "/api/cities",
     patchKey: "citiesId",
-    display: (r) => formatCity(r),
+    display: (r) => String(r.name_cities ?? ""),
     primaryHeader: "Город",
   },
   region: {
@@ -323,8 +323,14 @@ function mergeCharacteristicsIntoObjectRows(
 
 function getObjectCellValue(row: Record<string, unknown>, key: string): string {
   switch (key) {
-    case "__region":
-      return formatGroupPlace(row.id_region);
+    case "__region": {
+      const city =
+        row.id_cities && typeof row.id_cities === "object"
+          ? (row.id_cities as Record<string, unknown>)
+          : null;
+      const regionFromCity = city?.id_region;
+      return formatGroupPlace(row.id_region ?? regionFromCity);
+    }
     case "__city":
       return formatCity(row.id_cities);
     case "__group":
@@ -350,6 +356,32 @@ function getObjectCellValue(row: Record<string, unknown>, key: string): string {
         return row[key] === true ? "Да" : row[key] === false ? "Нет" : "";
       return str(row[key]);
   }
+}
+
+function resolveObjectRegionId(row: Record<string, unknown>): number | undefined {
+  const regionRaw = row.id_region;
+  const direct =
+    typeof regionRaw === "number"
+      ? regionRaw
+      : getNestedId(regionRaw, "id_region") ?? getNestedId(regionRaw, "idRegion");
+  if (typeof direct === "number") return direct;
+  const cityRaw = row.id_cities;
+  return (
+    (typeof cityRaw === "object" && cityRaw
+      ? getNestedId((cityRaw as Record<string, unknown>).id_region, "id_region") ??
+        getNestedId((cityRaw as Record<string, unknown>).id_region, "idRegion")
+      : undefined) ?? undefined
+  );
+}
+
+function cityMatchesRegion(city: Record<string, unknown>, regionId: number | undefined): boolean {
+  if (typeof regionId !== "number") return true;
+  const raw = city.id_region;
+  const cityRegionId =
+    typeof raw === "number"
+      ? raw
+      : getNestedId(raw, "id_region") ?? getNestedId(raw, "idRegion");
+  return cityRegionId === regionId;
 }
 
 function filterAndSortData(
@@ -864,6 +896,7 @@ function ReferenceModal(props: {
   kind: RefKind;
   rows: Record<string, unknown>[];
   regions: Record<string, unknown>[];
+  districts: Record<string, unknown>[];
   selectedRows?: Record<string, unknown>[];
   onClose: () => void;
   onPick: (id: number) => void;
@@ -875,7 +908,10 @@ function ReferenceModal(props: {
   const cfg = REF_CONFIG[props.kind];
   const [newVal, setNewVal] = useState("");
   const [cityIndex, setCityIndex] = useState("");
-  const [cityDistrict, setCityDistrict] = useState("");
+  const [cityDistrictId, setCityDistrictId] = useState<number>(() => {
+    const d = props.districts[0];
+    return d && typeof d.id_district === "number" ? d.id_district : 1;
+  });
   const [cityName, setCityName] = useState("");
   const [cityRegionId, setCityRegionId] = useState<number>(() => {
     const r = props.regions[0];
@@ -930,10 +966,10 @@ function ReferenceModal(props: {
       if (props.kind === "cities") {
         const created = await apiPost<Record<string, unknown>>(cfg.path, {
           idRegion: cityRegionId,
+          idDistrict: cityDistrictId,
           nameCities: cityName.trim() || "Новый город",
           name_cities: cityName.trim() || "Новый город",
           index: cityIndex.trim(),
-          district: cityDistrict.trim(),
         });
         props.onCreate(created);
         props.showToast("Город добавлен");
@@ -1020,12 +1056,17 @@ function ReferenceModal(props: {
                     value={cityIndex}
                     onChange={(e) => setCityIndex(e.target.value)}
                   />
-                  <input
-                    className="cell-input-minimal"
-                    placeholder="Район"
-                    value={cityDistrict}
-                    onChange={(e) => setCityDistrict(e.target.value)}
-                  />
+                  <select
+                    className="filter-select cell-select-minimal"
+                    value={cityDistrictId}
+                    onChange={(e) => setCityDistrictId(Number(e.target.value))}
+                  >
+                    {props.districts.map((d) => (
+                      <option key={str(d.id_district)} value={str(d.id_district)}>
+                        {str(d.name_district)}
+                      </option>
+                    ))}
+                  </select>
                   <select
                     className="filter-select cell-select-minimal"
                     value={cityRegionId}
@@ -1092,7 +1133,12 @@ function ReferenceModal(props: {
                             )}
                           </td>
                           <td style={{ color: "#64748b" }}>{str(item.index)}</td>
-                          <td style={{ color: "#64748b" }}>{str(item.district)}</td>
+                          <td style={{ color: "#64748b" }}>
+                            {str(
+                              (item.id_district as Record<string, unknown> | undefined)
+                                ?.name_district
+                            )}
+                          </td>
                         </>
                       )}
                     </tr>
@@ -1211,6 +1257,7 @@ export default function App() {
     Record<GridRefKind, Record<string, unknown>[]>
   >({
     classDanger: [],
+    district: [],
     region: [],
     typeTrash1: [],
     levelTrash: [],
@@ -1221,6 +1268,7 @@ export default function App() {
     physicalState: [],
   });
   const [regionsList, setRegionsList] = useState<Record<string, unknown>[]>([]);
+  const [districtsList, setDistrictsList] = useState<Record<string, unknown>[]>([]);
 
   const [refModal, setRefModal] = useState<{
     kind: RefKind;
@@ -1282,6 +1330,7 @@ export default function App() {
         storage,
         degree,
         regions,
+        districts,
         magazin,
         classDanger,
         typeTrash1,
@@ -1295,6 +1344,7 @@ export default function App() {
         apiGet<Record<string, unknown>[]>("/api/storage-scheme"),
         apiGet<Record<string, unknown>[]>("/api/gruops-degree"),
         apiGet<Record<string, unknown>[]>("/api/region"),
+        apiGet<Record<string, unknown>[]>("/api/district"),
         apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
         apiGet<Record<string, unknown>[]>("/api/classDanger"),
         apiGet<Record<string, unknown>[]>("/api/type-trash1"),
@@ -1306,6 +1356,7 @@ export default function App() {
       setRefCache({ cities, region: regions, group, storage, degree, magazin });
       setGridRefLists({
         classDanger,
+        district: districts,
         region: regions,
         typeTrash1,
         levelTrash,
@@ -1316,6 +1367,7 @@ export default function App() {
         physicalState: Array.isArray(physicalState) ? physicalState : [],
       });
       setRegionsList(regions);
+      setDistrictsList(districts);
     } catch {
       /* ignore */
     }
@@ -2217,63 +2269,17 @@ export default function App() {
                             const cw = getColWidth(col.key);
                             if (col.ref) {
                               const rk = col.ref;
-                              const val =
-                                rk === "region"
-                                  ? (() => {
-                                      const raw =
-                                        row.id_region ??
-                                        (row.id_cities &&
-                                        typeof row.id_cities === "object"
-                                          ? (row.id_cities as Record<string, unknown>).id_region
-                                          : undefined);
-                                      if (raw && typeof raw === "object")
-                                        return REF_CONFIG.region.display(
-                                          raw as Record<string, unknown>
-                                        );
-                                      const rid =
-                                        typeof raw === "number"
-                                          ? raw
-                                          : getNestedId(raw, "id_region") ??
-                                            getNestedId(raw, "idRegion");
-                                      if (typeof rid === "number") {
-                                        const found = refCache.region.find(
-                                          (r) => getNestedId(r, "id_region") === rid
-                                        );
-                                        if (found) return REF_CONFIG.region.display(found);
-                                      }
-                                      const cityRaw = row.id_cities;
-                                      const cityId =
-                                        typeof cityRaw === "number"
-                                          ? cityRaw
-                                          : cityRaw && typeof cityRaw === "object"
-                                            ? getNestedId(cityRaw, "id_cities") ??
-                                              getNestedId(cityRaw, "idCities")
-                                            : undefined;
-                                      if (typeof cityId === "number") {
-                                        const city = refCache.cities.find(
-                                          (c) => getNestedId(c, "id_cities") === cityId
-                                        );
-                                        const cityRegion =
-                                          city &&
-                                          (typeof city.id_region === "number"
-                                            ? city.id_region
-                                            : getNestedId(city.id_region, "id_region"));
-                                        if (typeof cityRegion === "number") {
-                                          const found = refCache.region.find(
-                                            (r) => getNestedId(r, "id_region") === cityRegion
-                                          );
-                                          if (found) return REF_CONFIG.region.display(found);
-                                        }
-                                      }
-                                      return "";
-                                    })()
-                                  : getObjectCellValue(row, col.key);
-                              const sug = refCache[rk].filter((r) =>
-                                REF_CONFIG[rk]
+                              const val = getObjectCellValue(row, col.key);
+                              const rowRegionId = resolveObjectRegionId(row);
+                              const sug = refCache[rk].filter((r) => {
+                                if (rk === "cities" && !cityMatchesRegion(r, rowRegionId)) {
+                                  return false;
+                                }
+                                return REF_CONFIG[rk]
                                   .display(r)
                                   .toLowerCase()
-                                  .includes((editingRef?.filter ?? "").toLowerCase())
-                              );
+                                  .includes((editingRef?.filter ?? "").toLowerCase());
+                              });
                               const showAc =
                                 editingRef?.kind === rk &&
                                 editingRef.colKey === col.key &&
@@ -3020,8 +3026,17 @@ export default function App() {
       {refModal && (
         <ReferenceModal
           kind={refModal.kind}
-          rows={refCache[refModal.kind]}
+          rows={
+            refModal.kind === "cities" &&
+            rows[refModal.rowIndex] &&
+            typeof rows[refModal.rowIndex] === "object"
+              ? refCache.cities.filter((c) =>
+                  cityMatchesRegion(c, resolveObjectRegionId(rows[refModal.rowIndex]))
+                )
+              : refCache[refModal.kind]
+          }
           regions={regionsList}
+          districts={districtsList}
           selectedRows={
             refModal.kind === "magazin" &&
             rows[refModal.rowIndex] &&
