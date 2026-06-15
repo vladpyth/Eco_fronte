@@ -17,16 +17,67 @@ body {
   padding: 16px;
 }
 
-.app-container {
+.app-shell {
   max-width: 1600px;
   width: 100%;
-  background: #fafafa;
-  border-radius: 2px;
-  border: 1px solid #d4d4d8;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.app-module-bar {
+  display: flex;
+  gap: 0;
+  background: #e4e4e7;
+  border: 1px solid #d4d4d8;
+  border-bottom: none;
+  border-radius: 2px 2px 0 0;
+  padding: 0 8px;
+}
+
+.app-module-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #52525b;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.app-module-btn:hover {
+  color: #18181b;
+  background: rgba(250, 250, 250, 0.6);
+}
+
+.app-module-btn.active {
+  color: #18181b;
+  background: #fafafa;
+  border-bottom-color: #3f3f46;
+}
+
+.app-container {
+  width: 100%;
+  background: #fafafa;
+  border-radius: 0 0 2px 2px;
+  border: 1px solid #d4d4d8;
   display: flex;
   overflow: hidden;
   min-height: 700px;
+}
+
+.module-placeholder-text {
+  margin: 0 0 16px;
+  color: #71717a;
+  font-size: 14px;
+}
+
+.module-placeholder-note {
+  max-width: 520px;
 }
 
 .sidebar {
@@ -460,7 +511,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1100;
+}
+
+.object-card-overlay {
+  z-index: 900;
 }
 
 .modal-content {
@@ -472,6 +527,87 @@ body {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
+}
+
+.object-card-modal {
+  max-width: 920px;
+  width: 94%;
+}
+
+.object-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.object-card-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 34%) 1fr;
+  gap: 12px;
+  align-items: start;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+.object-card-field:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.object-card-label {
+  font-size: 13px;
+  color: #52525b;
+  padding-top: 6px;
+  line-height: 1.35;
+}
+
+.object-card-value {
+  min-width: 0;
+}
+
+.object-card-ref {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.object-card-display {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.col-actions .btn-small + .btn-small {
+  margin-left: 6px;
+}
+
+.object-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #d4d4d8;
+}
+
+.object-card-submit {
+  background: #18181b;
+  color: #fafafa;
+  border-color: #18181b;
+}
+
+.object-card-submit:hover:not(:disabled) {
+  background: #27272a;
+}
+
+.object-card-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .modal-header {

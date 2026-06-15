@@ -62,3 +62,6 @@ export const OBJECT_COLUMNS: ObjectCol[] = [
   { key: "reson_axclute", label: "Основание", editable: true, multiline: true },
   { key: "status", label: "Исключен", editable: true, type: "bool" },
 ];
+
+/** Первые 6 колонок в основной таблице объектов; остальные — в карточке объекта. */
+export const OBJECT_TABLE_COLUMNS: ObjectCol[] = OBJECT_COLUMNS.slice(0, 6);

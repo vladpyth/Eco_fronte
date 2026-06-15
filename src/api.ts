@@ -1,4 +1,6 @@
 /** Пусто = относительный URL (тот же хост; nginx должен проксировать /api на Spring). Иначе полный URL бэкенда, например http://api.example.com:8080 */
+import { resolveApiPath } from "./apiModule";
+
 const RAW_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 const BASE = RAW_BASE ? RAW_BASE.replace(/\/$/, "") : "";
 
@@ -61,7 +63,7 @@ async function parseJsonBody<T>(res: Response, text: string): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const url = resolveApiPath(path);
   const res = await fetch(url);
   const text = await readBodyAsText(res);
   if (!res.ok) throw new Error(await parseErrorMessage(res, text));
@@ -69,7 +71,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const url = resolveApiPath(path);
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -81,7 +83,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const url = resolveApiPath(path);
   const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -93,7 +95,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const url = path.startsWith("http") ? path : `${BASE}${path}`;
+  const url = resolveApiPath(path);
   const res = await fetch(url, { method: "DELETE" });
   const text = await readBodyAsText(res);
   if (!res.ok) throw new Error(await parseErrorMessage(res, text));
