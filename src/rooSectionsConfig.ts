@@ -25,6 +25,8 @@ export type RooCol = {
   readOnly?: boolean;
   format?: (row: Record<string, unknown>) => string;
   gridRef?: RooGridRefKind;
+  /** Подпись в ячейке для gridRef (без изменения списка в модалке справочника). */
+  gridRefDisplay?: (r: Record<string, unknown>) => string;
   /** Для gridRef numberPhone: 0 — юр. лицо, 1 — объект */
   phoneUrOb?: 0 | 1;
 };
@@ -166,12 +168,13 @@ export function rooCellValue(
   }
   if (col.gridRef) {
     const spec = ROO_GRID_REF_SPECS[col.gridRef];
+    const display = col.gridRefDisplay ?? spec.display;
     const v = row[col.key];
-    if (v && typeof v === "object") return spec.display(v as Record<string, unknown>);
+    if (v && typeof v === "object") return display(v as Record<string, unknown>);
     const id = typeof v === "number" ? v : getNestedId(v, spec.idField);
     if (id != null && gridRefCache) {
       const found = gridRefCache[col.gridRef].find((r) => pickFk(r, spec.idField) === id);
-      if (found) return spec.display(found);
+      if (found) return display(found);
     }
     return id != null ? String(id) : "";
   }
@@ -256,9 +259,19 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     title: "Отходы предприятия (MyTrash)",
     sidebar: "Отходы предприятия",
     columns: [
-      { key: "id_magasin_factory", label: "Предприятие", gridRef: "magasinFactory" },
+      {
+        key: "id_magasin_factory",
+        label: "Предприятие",
+        gridRef: "magasinFactory",
+        gridRefDisplay: (r) => S(r.name_obj),
+      },
       { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
-      { key: "id_magazin_trash", label: "Отход", gridRef: "magazinTrash" },
+      {
+        key: "id_magazin_trash",
+        label: "Отход",
+        gridRef: "magazinTrash",
+        gridRefDisplay: (r) => S(r.name_trash),
+      },
       { key: "value_trash", label: "Количество, т", type: "float" },
     ],
     toRequest: (row) => ({
@@ -287,7 +300,12 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     title: "Выбросы в атмосферу (DropAir)",
     sidebar: "Выбросы",
     columns: [
-      { key: "id_magasin_factory", label: "Предприятие", gridRef: "magasinFactory" },
+      {
+        key: "id_magasin_factory",
+        label: "Предприятие",
+        gridRef: "magasinFactory",
+        gridRefDisplay: (r) => S(r.name_obj),
+      },
       { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
       { key: "id_name_grope_air", label: "Наименование выброса", gridRef: "nameDropAirTrash" },
       { key: "value_drop_trash", label: "Значение, т/год", type: "float" },
@@ -342,22 +360,39 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     title: "Технологии (Technology)",
     sidebar: "Технологии",
     columns: [
+      {
+        key: "id_magasin_factory",
+        label: "Предприятие",
+        gridRef: "magasinFactory",
+        gridRefDisplay: (r) => S(r.name_obj),
+      },
       { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
-      { key: "id_magazin_trash", label: "Отход", gridRef: "magazinTrash" },
+      {
+        key: "id_magazin_trash",
+        label: "Отход",
+        gridRef: "magazinTrash",
+        gridRefDisplay: (r) => S(r.name_trash),
+      },
       { key: "id_phys_trash", label: "Физ. состояние", gridRef: "physStateTrash" },
     ],
-    toRequest: (row) => ({
-      id_class_danger: pickFk(row.id_class_danger, "id_class_danger"),
-      id_magazin_trash: pickFk(row.id_magazin_trash, "id_magazin_trash"),
-      id_phys_trash: pickFk(row.id_phys_trash, "id_mame_group"),
-    }),
+    toRequest: (row) => {
+      const factoryId = pickFk(row.id_magasin_factory, "id_magasin_factory");
+      return {
+        id_class_danger: pickFk(row.id_class_danger, "id_class_danger"),
+        id_magazin_trash: pickFk(row.id_magazin_trash, "id_magazin_trash"),
+        id_phys_trash: pickFk(row.id_phys_trash, "id_mame_group"),
+        id_magasin_factory: factoryId > 0 ? factoryId : null,
+      };
+    },
     createDefault: async () => {
-      const [classes, trash, phys] = await Promise.all([
+      const [factories, classes, trash, phys] = await Promise.all([
+        apiGet<Record<string, unknown>[]>("/api/magasin-factory"),
         apiGet<Record<string, unknown>[]>("/api/class-danger"),
         apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
         apiGet<Record<string, unknown>[]>("/api/phys-state-trash"),
       ]);
       return {
+        id_magasin_factory: pickFk(factories[0], "id_magasin_factory"),
         id_class_danger: pickFk(classes[0], "id_class_danger"),
         id_magazin_trash: pickFk(trash[0], "id_magazin_trash"),
         id_phys_trash: pickFk(phys[0], "id_mame_group"),

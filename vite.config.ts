@@ -5,11 +5,16 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // Важно: /api-poo раньше /api/, иначе /api перехватывает /api-poo/* → 8080 (РХЗО)
+      // Важно: /api-poo и /api-ponod раньше /api/, иначе /api перехватывает их → 8080 (РХЗО)
       "/api-poo": {
         target: "http://localhost:8081",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-poo/, "/api"),
+      },
+      "/api-ponod": {
+        target: "http://localhost:8082",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-ponod/, "/api"),
       },
       "/api/": {
         target: "http://localhost:8080",

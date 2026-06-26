@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   APP_MODULE_META,
   loadAppModule,
@@ -8,20 +8,21 @@ import {
 import { setApiModule } from "./apiModule";
 import { RhzoApp } from "./RhzoApp";
 import { RooApp } from "./RooApp";
+import { RoioApp } from "./RoioApp";
 import "./App.css";
 
 export default function App() {
-  const [module, setModuleState] = useState<AppModule>(loadAppModule);
+  const [module, setModuleState] = useState<AppModule>(() => {
+    const loaded = loadAppModule();
+    setApiModule(loaded);
+    return loaded;
+  });
 
   const setModule = useCallback((next: AppModule) => {
+    setApiModule(next);
     setModuleState(next);
     saveAppModule(next);
-    setApiModule(next);
   }, []);
-
-  useEffect(() => {
-    setApiModule(module);
-  }, [module]);
 
   return (
     <div className="app-shell">
@@ -42,7 +43,7 @@ export default function App() {
           );
         })}
       </nav>
-      {module === "rhzo" ? <RhzoApp /> : <RooApp />}
+      {module === "rhzo" ? <RhzoApp /> : module === "roo" ? <RooApp /> : <RoioApp />}
     </div>
   );
 }

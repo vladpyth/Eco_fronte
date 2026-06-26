@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiDelete, apiGet, apiPost, apiPut, getNestedId } from "./api";
+import { GridCardModal } from "./GridCardModal";
 import "./App.css";
 
 const DEFAULT_COL_WIDTH = 148;
@@ -71,6 +72,10 @@ export type GridRegistryAppProps = {
     row: Record<string, unknown>,
     picked?: Record<string, unknown>
   ) => Promise<Record<string, unknown> | null>;
+  /** Разделы с формой-карточкой (добавление и редактирование одним запросом). */
+  cardSectionIds?: string[];
+  /** Ссылки на экспорт отчётов внизу бокового меню. */
+  sidebarReportLinks?: { href: string; label: string }[];
 };
 
 type UiState = { searchQuery: string; sortColumn: string | null; sortDirection: "asc" | "desc" };
@@ -191,8 +196,45 @@ function parseGridInput(raw: string, col: GridCol, row: Record<string, unknown>)
     return Number.isNaN(n) ? row[col.key] : n;
   }
   if (col.type === "bool") return raw === "Да" || raw === "true" || raw === "1";
+  if (col.type === "date") return raw.trim() === "" ? null : raw;
   return raw;
 }
+
+function resolveFkValue(
+  col: GridCol,
+  value: unknown,
+  gridRefLists: Record<string, Record<string, unknown>[]>,
+  gridRefSpecs: Record<string, GridRefSpec>
+): unknown {
+  if (!col.gridRef) return value;
+  const spec = gridRefSpecs[col.gridRef];
+  if (!spec) return value;
+  const id = typeof value === "number" ? value : pickFk(value, spec.idField);
+  if (id <= 0) return null;
+  const found = gridRefLists[col.gridRef]?.find((r) => pickFk(r, spec.idField) === id);
+  return found ?? value;
+}
+
+function bodyToDraftRow(
+  columns: GridCol[],
+  body: Record<string, unknown>,
+  gridRefLists: Record<string, Record<string, unknown>[]>,
+  gridRefSpecs: Record<string, GridRefSpec>
+): Record<string, unknown> {
+  const draft: Record<string, unknown> = { ...body };
+  for (const col of columns) {
+    if (Object.prototype.hasOwnProperty.call(body, col.key)) {
+      draft[col.key] = resolveFkValue(col, body[col.key], gridRefLists, gridRefSpecs);
+    }
+  }
+  return draft;
+}
+
+type GridCardState = {
+  mode: "create" | "edit";
+  rowIndex?: number;
+  draft: Record<string, unknown>;
+};
 
 function GridReferenceModal(props: {
   spec: GridRefSpec;
@@ -357,7 +399,19 @@ function GridValueCell(props: {
 }
 
 export function GridRegistryApp(props: GridRegistryAppProps) {
-  const { getSection, cellValue, loadGridRefLists, gridRefSpecs, colWidthsStorageKey, enrichLoadedRows, patchRowAfterSave, handleGridRefAction } = props;
+  const {
+    getSection,
+    cellValue,
+    loadGridRefLists,
+    gridRefSpecs,
+    colWidthsStorageKey,
+    enrichLoadedRows,
+    patchRowAfterSave,
+    handleGridRefAction,
+    cardSectionIds,
+  } = props;
+  const cardSections = useMemo(() => new Set(cardSectionIds ?? []), [cardSectionIds]);
+  const hasCardForm = cardSections.has.bind(cardSections);
   const [section, setSection] = useState(props.defaultSection);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -369,8 +423,15 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
   const [gridRefLists, setGridRefLists] = useState<Record<string, Record<string, unknown>[]>>({});
   const gridRefListsRef = useRef(gridRefLists);
   gridRefListsRef.current = gridRefLists;
-  const [gridRefModal, setGridRefModal] = useState<{ kind: string; rowIndex: number; colKey: string } | null>(null);
+  const [gridRefModal, setGridRefModal] = useState<{
+    kind: string;
+    rowIndex?: number;
+    colKey: string;
+    target: "table" | "card";
+  } | null>(null);
   const [editingGridRef, setEditingGridRef] = useState<{ kind: string; rowIndex: number; colKey: string; filter: string } | null>(null);
+  const [gridCard, setGridCard] = useState<GridCardState | null>(null);
+  const [gridCardSubmitting, setGridCardSubmitting] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem(colWidthsStorageKey, JSON.stringify(colWidths)); } catch { /* ignore */ }
@@ -437,7 +498,7 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
 
   useEffect(() => { void loadSection(section); }, [section, loadSection]);
   useEffect(() => { void refreshGridRefLists(); }, [refreshGridRefLists]);
-  useEffect(() => { setEditingGridRef(null); setGridRefModal(null); }, [section]);
+  useEffect(() => { setEditingGridRef(null); setGridRefModal(null); setGridCard(null); }, [section]);
 
   useEffect(() => {
     if (!enrichLoadedRows) return;
@@ -458,7 +519,11 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
   }, [rows, gridColumns, ui, cellValue, gridUsesGridRef, gridRefLists, idField]);
 
   const clearFilters = () => setUi({ searchQuery: "", sortColumn: null, sortDirection: "asc" });
-  const switchSection = (s: string) => { setSection(s); clearFilters(); };
+  const switchSection = (s: string) => {
+    setSection(s);
+    setGridCard(null);
+    clearFilters();
+  };
   const resolveGridRowIndex = (filteredRow: Record<string, unknown>) =>
     rows.findIndex((r) => r[idField] === filteredRow[idField]);
 
@@ -553,6 +618,169 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     }
   };
 
+  const openGridCreateCard = async () => {
+    try {
+      const body = await sectionDef.createDefault();
+      let draft = bodyToDraftRow(sectionDef.columns, body, gridRefLists, gridRefSpecs);
+      if (enrichLoadedRows) {
+        const [enriched] = enrichLoadedRows(section, [draft], gridRefLists);
+        draft = enriched;
+      }
+      setGridCard({ mode: "create", draft });
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка");
+    }
+  };
+
+  const triggerAddRow = () => {
+    if (hasCardForm(section)) void openGridCreateCard();
+    else void addGridRow();
+  };
+
+  const openGridEditCard = (row: Record<string, unknown>, rowIndex: number) => {
+    let draft = { ...row };
+    if (enrichLoadedRows) {
+      const [enriched] = enrichLoadedRows(section, [row], gridRefLists);
+      draft = enriched;
+    }
+    setGridCard({ mode: "edit", rowIndex, draft });
+  };
+
+  const onGridCardDraftChange = (colKey: string, value: string, type?: GridCol["type"]) => {
+    const col = gridColumns.find((c) => c.key === colKey);
+    if (!col || col.readOnly || col.format || col.gridRef) return;
+    setGridCard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        draft: { ...prev.draft, [colKey]: parseGridInput(value, col, prev.draft) },
+      };
+    });
+  };
+
+  const applyGridFkToCardDraft = (colKey: string, picked: Record<string, unknown> | null) => {
+    setGridCard((prev) => {
+      if (!prev) return prev;
+      return { ...prev, draft: { ...prev.draft, [colKey]: picked } };
+    });
+    setEditingGridRef(null);
+    setGridRefModal(null);
+  };
+
+  const applyCardGridRefPick = async (colKey: string, picked: Record<string, unknown>) => {
+    const col = gridColumns.find((c) => c.key === colKey);
+    if (!col) return;
+    if (col.gridRef === "numberPhone" && handleGridRefAction) {
+      if (!gridCard || gridCard.mode === "create") {
+        showToast("Сначала сохраните запись кнопкой «Добавить»");
+        setGridRefModal(null);
+        return;
+      }
+      try {
+        const custom = await handleGridRefAction("pick", section, col, gridCard.draft, picked);
+        if (custom) setGridCard((prev) => (prev ? { ...prev, draft: custom } : prev));
+        showToast("Сохранено");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Ошибка");
+      }
+      setGridRefModal(null);
+      return;
+    }
+    applyGridFkToCardDraft(colKey, picked);
+  };
+
+  const applyCardGridRefClear = async (colKey: string) => {
+    const col = gridColumns.find((c) => c.key === colKey);
+    if (!col) return;
+    if (col.gridRef === "numberPhone" && handleGridRefAction && gridCard) {
+      if (gridCard.mode === "create") {
+        showToast("Сначала сохраните запись");
+        setGridRefModal(null);
+        return;
+      }
+      try {
+        const custom = await handleGridRefAction("clear", section, col, gridCard.draft);
+        if (custom) setGridCard((prev) => (prev ? { ...prev, draft: custom } : prev));
+        showToast("Сохранено");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Ошибка");
+      }
+      setGridRefModal(null);
+      return;
+    }
+    applyGridFkToCardDraft(colKey, null);
+  };
+
+  const submitGridCard = async () => {
+    if (!gridCard || gridCardSubmitting) return;
+    setGridCardSubmitting(true);
+    try {
+      if (gridCard.mode === "create") {
+        const created = await apiPost<Record<string, unknown>>(
+          sectionDef.apiPath,
+          sectionDef.toRequest(gridCard.draft)
+        );
+        let merged = mergeGridRefFieldsFromPrev(gridCard.draft, created, sectionDef.columns);
+        if (patchRowAfterSave) {
+          merged = patchRowAfterSave(section, gridCard.draft, merged, gridRefLists);
+        }
+        showToast("Добавлено");
+      } else {
+        const id = gridCard.draft[idField];
+        if (typeof id !== "number" || id < 0) throw new Error("Некорректный id записи");
+        const updated = await apiPut<Record<string, unknown>>(
+          `${sectionDef.apiPath}/${id}`,
+          sectionDef.toRequest(gridCard.draft)
+        );
+        let merged = mergeGridRefFieldsFromPrev(gridCard.draft, updated, sectionDef.columns);
+        if (patchRowAfterSave) {
+          merged = patchRowAfterSave(section, gridCard.draft, merged, gridRefLists);
+        }
+        if (enrichLoadedRows) {
+          const [enriched] = enrichLoadedRows(section, [merged], gridRefLists);
+          merged = enriched;
+        }
+        setRows((prev) => {
+          const next = [...prev];
+          const origIdx =
+            gridCard.rowIndex ?? prev.findIndex((r) => r[idField] === id);
+          if (origIdx >= 0) next[origIdx] = merged;
+          return next;
+        });
+        showToast("Сохранено");
+        setGridCard(null);
+        setGridCardSubmitting(false);
+        return;
+      }
+      setGridCard(null);
+      await loadSection(section);
+      void refreshGridRefLists();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setGridCardSubmitting(false);
+    }
+  };
+
+  const openGridRefFromCard = (colKey: string) => {
+    const col = gridColumns.find((c) => c.key === colKey);
+    if (!col?.gridRef) return;
+    setGridRefModal({ kind: col.gridRef, colKey, target: "card" });
+  };
+
+  const cardModalTitle = useMemo(() => {
+    if (!gridCard) return "";
+    if (gridCard.mode === "create") return `Новая запись — ${sectionDef.sidebar}`;
+    const nameCol = gridColumns.find(
+      (c) => c.key === "name_obj" || c.key === "name_trash" || c.key === "name_own"
+    );
+    if (nameCol) {
+      const label = cellValue(gridCard.draft, nameCol, gridRefLists);
+      if (label) return `${sectionDef.sidebar} — ${label}`;
+    }
+    return `Карточка — ${sectionDef.sidebar}`;
+  }, [gridCard, sectionDef.sidebar, gridColumns, cellValue, gridRefLists]);
+
   const sortHeaderClick = (colKey: string) => {
     setUi((prev) => prev.sortColumn === colKey
       ? { ...prev, sortDirection: prev.sortDirection === "asc" ? "desc" : "asc" }
@@ -572,6 +800,18 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
             </button>
           ))}
         </nav>
+        {props.sidebarReportLinks && props.sidebarReportLinks.length > 0 ? (
+          <div className="info-note" style={{ margin: "12px" }}>
+            {props.sidebarReportLinks.map((link, i) => (
+              <span key={link.href}>
+                {i > 0 ? <br /> : null}
+                <a className="toolbar-link" href={link.href} target="_blank" rel="noreferrer">
+                  {link.label}
+                </a>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </aside>
 
       <main className="main-content">
@@ -617,7 +857,14 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                             return (
                               <GridRefCell key={col.key} col={col} row={row} idx={idx} width={gcw} spec={gridRefSpecs[gk]} val={cellValue(row, col, gridRefLists)}
                                 list={gridRefLists[gk] ?? []} editing={editingGridRef} setEditing={setEditingGridRef}
-                                openModal={() => setGridRefModal({ kind: gk, rowIndex: idx, colKey: col.key })}
+                                openModal={() =>
+                                  setGridRefModal({
+                                    kind: gk,
+                                    rowIndex: idx,
+                                    colKey: col.key,
+                                    target: "table",
+                                  })
+                                }
                                 onPick={(picked) => void applyGridFkAndSave(idx, col.key, picked)}
                                 onClear={() => void applyGridFkClear(idx, col.key)} />
                             );
@@ -629,7 +876,18 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                           );
                         })}
                         <td className="col-actions">
-                          <button type="button" className="btn-small" onClick={() => void deleteRow(row)}>Удалить</button>
+                          {hasCardForm(section) ? (
+                            <button
+                              type="button"
+                              className="btn-small"
+                              onClick={() => openGridEditCard(row, idx)}
+                            >
+                              Карточка
+                            </button>
+                          ) : null}
+                          <button type="button" className="btn-small" onClick={() => void deleteRow(row)}>
+                            Удалить
+                          </button>
                         </td>
                       </tr>
                     );
@@ -645,14 +903,49 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
             </div>
           </>
         )}
-        <button type="button" className="floating-add-btn" onClick={() => void addGridRow()}>Добавить строку</button>
+        <button type="button" className="floating-add-btn" onClick={triggerAddRow}>
+          {hasCardForm(section) ? "Добавить" : "Добавить строку"}
+        </button>
       </main>
 
       {gridRefModal && modalSpec && (
-        <GridReferenceModal spec={modalSpec} rows={gridRefLists[gridRefModal.kind] ?? []} onClose={() => setGridRefModal(null)}
-          onPick={(picked) => void applyGridFkAndSave(gridRefModal.rowIndex, gridRefModal.colKey, picked)}
-          onCreated={(created) => mergeGridRefIntoCache(gridRefModal.kind, created)} showToast={showToast}
-          allowClear={modalSpec.nullable === true} onClear={() => void applyGridFkClear(gridRefModal.rowIndex, gridRefModal.colKey)} />
+        <GridReferenceModal
+          spec={modalSpec}
+          rows={gridRefLists[gridRefModal.kind] ?? []}
+          onClose={() => setGridRefModal(null)}
+          onPick={(picked) => {
+            if (gridRefModal.target === "card") {
+              void applyCardGridRefPick(gridRefModal.colKey, picked);
+            } else if (gridRefModal.rowIndex !== undefined) {
+              void applyGridFkAndSave(gridRefModal.rowIndex, gridRefModal.colKey, picked);
+            }
+          }}
+          onCreated={(created) => mergeGridRefIntoCache(gridRefModal.kind, created)}
+          showToast={showToast}
+          allowClear={modalSpec.nullable === true}
+          onClear={() => {
+            if (gridRefModal.target === "card") {
+              void applyCardGridRefClear(gridRefModal.colKey);
+            } else if (gridRefModal.rowIndex !== undefined) {
+              void applyGridFkClear(gridRefModal.rowIndex, gridRefModal.colKey);
+            }
+          }}
+        />
+      )}
+
+      {gridCard && (
+        <GridCardModal
+          mode={gridCard.mode}
+          title={cardModalTitle}
+          draft={gridCard.draft}
+          columns={gridColumns}
+          getCellValue={(row, col) => cellValue(row, col, gridRefLists)}
+          onClose={() => setGridCard(null)}
+          onDraftChange={onGridCardDraftChange}
+          onOpenGridRef={openGridRefFromCard}
+          onSubmit={() => void submitGridCard()}
+          submitting={gridCardSubmitting}
+        />
       )}
       {toast && <div className="toast">{toast}</div>}
     </div>

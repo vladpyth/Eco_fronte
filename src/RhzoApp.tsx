@@ -32,6 +32,7 @@ import {
   type ObjectCol,
   type RefKind,
 } from "./objectPlaceColumns";
+import { GridCardModal } from "./GridCardModal";
 
 const COL_WIDTHS_LS = "eco-service-col-widths";
 const DEFAULT_COL_WIDTH = 148;
@@ -436,6 +437,7 @@ function buildNewObjectDraft(rows: Record<string, unknown>[]): Record<string, un
     register: maxReg + 1,
     name_obj: "",
     name_own: "",
+    status: false,
     phones: [],
     aroundBuilds: [],
     naturalSaveBuildings: [],
@@ -561,6 +563,15 @@ function filterAndSortData(
   return filtered;
 }
 
+const GRID_CARD_SECTIONS = new Set<GridSectionId>([
+  "magazin-trash",
+  "characteristic-trash",
+]);
+
+function hasGridCard(sid: GridSectionId): boolean {
+  return GRID_CARD_SECTIONS.has(sid);
+}
+
 function apiPathForSection(s: SectionId): string {
   if (s === "objects") return "/api/object-place-trash";
   return getGridDef(s).apiPath;
@@ -609,8 +620,86 @@ function parseGridInput(
   if (col.type === "bool") {
     return raw === "Да" || raw === "true" || raw === "1";
   }
+  if (col.type === "date") {
+    return raw.trim() === "" ? null : raw;
+  }
   return raw;
 }
+
+function findGridRefRow(
+  lists: Record<GridRefKind, Record<string, unknown>[]>,
+  kind: GridRefKind,
+  id: number
+): Record<string, unknown> | number | null {
+  if (id <= 0) return null;
+  const spec = GRID_REF_SPECS[kind];
+  const found = lists[kind]?.find((r) => pickFk(r, spec.idField) === id);
+  return found ?? id;
+}
+
+function gridApiBodyToDraftRow(
+  sid: GridSectionId,
+  body: Record<string, unknown>,
+  lists: Record<GridRefKind, Record<string, unknown>[]>
+): Record<string, unknown> {
+  if (sid === "magazin-trash") {
+    const idClass = body.idClassDanger;
+    return {
+      code_trash: body.codeTrash,
+      name_trash: body.nameTrash,
+      id_class_danger:
+        idClass === FK_CLEAR || idClass == null || Number(idClass) <= 0
+          ? null
+          : findGridRefRow(lists, "classDanger", Number(idClass)),
+      id_type_trash: findGridRefRow(lists, "typeTrash1", Number(body.idTypeTrash ?? 0)),
+      id_level_trash: findGridRefRow(lists, "levelTrash", Number(body.idLevelTrash ?? 0)),
+      id_mame_group: findGridRefRow(lists, "nameGroup", Number(body.idMameGroup ?? 0)),
+      block1: body.block1,
+      group2: body.group2,
+      group3: body.group3,
+    };
+  }
+  if (sid === "characteristic-trash") {
+    const magId = Number(body.idMagazinTrash ?? 0);
+    return {
+      id_object_place_trash: findGridRefRow(
+        lists,
+        "objectPlaceTrash",
+        Number(body.idObjectPlaceTrash ?? 0)
+      ),
+      id_magazin_trash:
+        findGridRefRow(lists, "magazinTrashCode", magId) ??
+        findGridRefRow(lists, "magazinTrashName", magId),
+      id_state: findGridRefRow(lists, "physicalState", Number(body.idState ?? 0)),
+      weight_for_year: body.weightForYear ?? 0,
+      square_for_year: body.squareForYear ?? 0,
+    };
+  }
+  return { ...body };
+}
+
+function magazinClassDangerId(mag: unknown): number | null {
+  if (!mag || typeof mag !== "object") return null;
+  const cd = (mag as Record<string, unknown>).id_class_danger;
+  if (cd === null || cd === undefined) return null;
+  if (typeof cd === "number") return cd > 0 ? cd : null;
+  const id = getNestedId(cd, "id_class_danger");
+  return id != null && id > 0 ? id : null;
+}
+
+function magazinClassDangerObject(mag: unknown): Record<string, unknown> | null {
+  if (!mag || typeof mag !== "object") return null;
+  const cd = (mag as Record<string, unknown>).id_class_danger;
+  if (cd && typeof cd === "object") return cd as Record<string, unknown>;
+  return null;
+}
+
+type GridCardState = {
+  section: GridSectionId;
+  mode: "create" | "edit";
+  rowIndex?: number;
+  draft: Record<string, unknown>;
+};
 
 function PhoneModal(props: {
   row: Record<string, unknown>;
@@ -1380,7 +1469,7 @@ function ObjectCardModal(props: {
                 }`}
           </span>
           <button type="button" className="btn-small" onClick={props.onClose}>
-            {props.mode === "create" ? "Отмена" : "Закрыть"}
+            Отмена
           </button>
         </div>
         <div className="modal-body object-card-body">
@@ -1462,10 +1551,9 @@ function ObjectCardModal(props: {
                   <label className="object-card-label">{col.label}</label>
                   <div className="object-card-value">
                     <select
-                      key={`${rowId}-${col.key}-${v}`}
                       className="filter-select"
                       style={{ width: "100%" }}
-                      defaultValue={v}
+                      value={v}
                       onChange={(e) =>
                         props.onFieldChange(col.key, e.target.value, "bool")
                       }
@@ -1505,7 +1593,7 @@ function ObjectCardModal(props: {
                     key={`${rowId}-${col.key}-${v}`}
                     className="cell-input-minimal"
                     style={{ width: "100%", ...(editable ? {} : { background: "#f4f4f5" }) }}
-                    defaultValue={v}
+                    value={v}
                     type={
                       col.type === "number"
                         ? "number"
@@ -1514,7 +1602,7 @@ function ObjectCardModal(props: {
                           : "text"
                     }
                     readOnly={!editable}
-                    onBlur={(e) =>
+                    onChange={(e) =>
                       editable &&
                       props.onFieldChange(
                         col.key,
@@ -1528,30 +1616,30 @@ function ObjectCardModal(props: {
             );
           })}
         </div>
-        {props.mode === "create" && (
-          <div className="object-card-footer">
-            <button type="button" className="btn-small" onClick={props.onClose}>
-              Отмена
-            </button>
-            <button
-              type="button"
-              className="btn-small object-card-submit"
-              disabled={props.submitting}
-              onClick={props.onSubmit}
-            >
-              {props.submitting ? "Сохранение…" : "Добавить объект"}
-            </button>
-          </div>
-        )}
+        <div className="object-card-footer">
+          <button type="button" className="btn-small" onClick={props.onClose}>
+            Отмена
+          </button>
+          <button
+            type="button"
+            className="btn-small object-card-submit"
+            disabled={props.submitting}
+            onClick={() => props.onSubmit?.()}
+          >
+            {props.submitting
+              ? "Сохранение…"
+              : props.mode === "create"
+                ? "Добавить объект"
+                : "Сохранить"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 export function RhzoApp() {
-  useEffect(() => {
-    setApiModule("rhzo");
-  }, []);
+  setApiModule("rhzo");
 
   const [section, setSection] = useState<SectionId>("objects");
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -1677,9 +1765,10 @@ export function RhzoApp() {
 
   const [gridRefModal, setGridRefModal] = useState<{
     kind: GridRefKind;
-    rowIndex: number;
+    rowIndex?: number;
     colKey: string;
     section: GridSectionId;
+    target: "table" | "card";
   } | null>(null);
 
   const [editingRef, setEditingRef] = useState<{
@@ -1717,6 +1806,12 @@ export function RhzoApp() {
     | null
   >(null);
   const [objectCardRowIndex, setObjectCardRowIndex] = useState<number | null>(null);
+  const [objectCardEditDraft, setObjectCardEditDraft] = useState<Record<string, unknown> | null>(
+    null
+  );
+  const [objectEditSubmitting, setObjectEditSubmitting] = useState(false);
+  const [gridCard, setGridCard] = useState<GridCardState | null>(null);
+  const [gridCardSubmitting, setGridCardSubmitting] = useState(false);
   const [objectCreateDraft, setObjectCreateDraft] = useState<Record<string, unknown> | null>(
     null
   );
@@ -1915,7 +2010,9 @@ export function RhzoApp() {
     setEditingGridRef(null);
     setGridRefModal(null);
     setObjectCardRowIndex(null);
+    setObjectCardEditDraft(null);
     setObjectCreateDraft(null);
+    setGridCard(null);
   }, [section]);
 
   const objectColumnKeys = useMemo(() => OBJECT_COLUMNS.map((c) => c.key), []);
@@ -1932,12 +2029,10 @@ export function RhzoApp() {
     return mergeCharacteristicsIntoObjectRows(rows, characteristicTrashList);
   }, [section, rows, characteristicTrashList]);
 
-  const objectCardRow = useMemo(() => {
-    if (objectCardRowIndex === null) return null;
-    const row = rows[objectCardRowIndex];
-    if (!row) return null;
-    return mergeCharacteristicsIntoObjectRows([row], characteristicTrashList)[0];
-  }, [objectCardRowIndex, rows, characteristicTrashList]);
+  const objectCardEditDisplay = useMemo(() => {
+    if (!objectCardEditDraft) return null;
+    return mergeCharacteristicsIntoObjectRows([objectCardEditDraft], characteristicTrashList)[0];
+  }, [objectCardEditDraft, characteristicTrashList]);
 
   const objectCreateDisplay = useMemo(
     () => (objectCreateDraft ? enrichCreateDraftForDisplay(objectCreateDraft) : null),
@@ -1991,13 +2086,19 @@ export function RhzoApp() {
 
   const switchSection = (s: SectionId) => {
     setSection(s);
+    setGridCard(null);
     clearFilters();
   };
 
   const triggerAddRow = () => {
     if (section === "objects") {
       setObjectCardRowIndex(null);
+      setObjectCardEditDraft(null);
       setObjectCreateDraft(buildNewObjectDraft(rows));
+      return;
+    }
+    if (isGridSection(section) && hasGridCard(section)) {
+      void openGridCreateCard(section);
       return;
     }
     if (isGridSection(section)) {
@@ -2221,6 +2322,45 @@ export function RhzoApp() {
     });
   };
 
+  const onObjectEditFieldChange = (
+    key: string,
+    raw: string,
+    type?: ObjectCol["type"]
+  ) => {
+    setObjectCardEditDraft((prev) => {
+      if (!prev) return prev;
+      const patch = buildObjectFieldPatch(prev, key, raw, type);
+      if (!patch) return prev;
+      return { ...prev, ...patch };
+    });
+  };
+
+  const submitObjectEdit = async () => {
+    if (objectCardRowIndex === null || !objectCardEditDraft || objectEditSubmitting) return;
+    const id = objectCardEditDraft.id_object_place_trash;
+    if (typeof id !== "number") return;
+    setObjectEditSubmitting(true);
+    try {
+      const body = objectPlaceTrashToRequest(objectCardEditDraft);
+      const updated = await apiPut<Record<string, unknown>>(
+        `/api/object-place-trash/${id}`,
+        body
+      );
+      setRows((prev) => {
+        const next = [...prev];
+        next[objectCardRowIndex] = updated;
+        return next;
+      });
+      showToast("Сохранено");
+      setObjectCardRowIndex(null);
+      setObjectCardEditDraft(null);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setObjectEditSubmitting(false);
+    }
+  };
+
   const applyRefToObjectDraft = useCallback(
     (kind: RefKind, id: number) => {
       const idKey = refKindIdField(kind);
@@ -2254,6 +2394,36 @@ export function RhzoApp() {
     setObjectCreateDraft((prev) => {
       if (!prev) return prev;
       if (kind === "magazin") return { ...prev, __draftMagazin: [] };
+      if (kind === "cities") return { ...prev, id_cities: null, id_region: null };
+      const field = refKindToObjectField(kind);
+      return field ? { ...prev, [field]: null } : prev;
+    });
+  }, []);
+
+  const applyRefToObjectEditDraft = useCallback(
+    (kind: RefKind, id: number) => {
+      const idKey = refKindIdField(kind);
+      setObjectCardEditDraft((prev) => {
+        if (!prev) return prev;
+        if (kind === "cities") {
+          const city = refCache.cities.find((c) => Number(c[idKey]) === id);
+          if (!city) return prev;
+          const reg = city.id_region;
+          return { ...prev, id_cities: city, ...(reg ? { id_region: reg } : {}) };
+        }
+        const item = refCache[kind].find((r) => Number(r[idKey]) === id);
+        if (!item) return prev;
+        const field = refKindToObjectField(kind);
+        return field ? { ...prev, [field]: item } : prev;
+      });
+    },
+    [refCache]
+  );
+
+  const clearRefFromObjectEditDraft = useCallback((kind: RefKind) => {
+    setObjectCardEditDraft((prev) => {
+      if (!prev) return prev;
+      if (kind === "magazin") return prev;
       if (kind === "cities") return { ...prev, id_cities: null, id_region: null };
       const field = refKindToObjectField(kind);
       return field ? { ...prev, [field]: null } : prev;
@@ -2497,6 +2667,14 @@ export function RhzoApp() {
       applyRefToObjectDraft(kind, id);
       return;
     }
+    if (objectCardRowIndex !== null && rowIndex === objectCardRowIndex) {
+      if (kind === "magazin") {
+        showToast("Связь с отходом — в разделе «Характеристики отходов»");
+        return;
+      }
+      applyRefToObjectEditDraft(kind, id);
+      return;
+    }
     if (kind === "magazin") {
       await pickMagazinForObject(rowIndex, id);
       return;
@@ -2525,6 +2703,16 @@ export function RhzoApp() {
     setRefModal(null);
     if (rowIndex === OBJECT_CREATE_ROW_INDEX) {
       clearRefFromObjectDraft(kind);
+      setEditingRef(null);
+      return;
+    }
+    if (objectCardRowIndex !== null && rowIndex === objectCardRowIndex) {
+      if (kind === "magazin") {
+        showToast("Связь с отходом снимите в разделе «Характеристики отходов»");
+        setEditingRef(null);
+        return;
+      }
+      clearRefFromObjectEditDraft(kind);
       setEditingRef(null);
       return;
     }
@@ -2637,9 +2825,129 @@ export function RhzoApp() {
       });
       showToast("Сохранено");
       if (sid === "magazin-trash") void loadRefs();
+      if (sid === "characteristic-trash") void refreshCharacteristicTrashList();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Ошибка");
     }
+  };
+
+  const openGridCreateCard = async (sid: GridSectionId) => {
+    try {
+      const def = getGridDef(sid);
+      const body = await def.createDefault();
+      const draft = gridApiBodyToDraftRow(sid, body, gridRefLists);
+      setGridCard({ section: sid, mode: "create", draft });
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка");
+    }
+  };
+
+  const onGridCardDraftChange = (colKey: string, value: string, type?: SimpleCol["type"]) => {
+    if (!gridCard) return;
+    const col = getGridDef(gridCard.section).columns.find((c) => c.key === colKey);
+    if (!col || col.readOnly || col.format || col.gridRef) return;
+    setGridCard((prev) => {
+      if (!prev) return prev;
+      const nextVal = parseGridInput(value, col, prev.draft);
+      return { ...prev, draft: { ...prev.draft, [colKey]: nextVal } };
+    });
+  };
+
+  const applyGridFkToCardDraft = (
+    colKey: string,
+    picked: Record<string, unknown> | null
+  ) => {
+    setGridCard((prev) => {
+      if (!prev) return prev;
+      const sid = prev.section;
+      if (sid === "characteristic-trash" && colKey === "__class_danger") {
+        const mag = prev.draft.id_magazin_trash;
+        let magObj: Record<string, unknown>;
+        if (mag && typeof mag === "object") {
+          magObj = { ...(mag as Record<string, unknown>) };
+        } else {
+          const magId = pickFk(mag, "id_magazin_trash");
+          const found =
+            gridRefLists.magazinTrashCode.find(
+              (m) => pickFk(m, "id_magazin_trash") === magId
+            ) ??
+            gridRefLists.magazinTrashName.find(
+              (m) => pickFk(m, "id_magazin_trash") === magId
+            );
+          magObj = found ? { ...found } : { id_magazin_trash: magId };
+        }
+        magObj.id_class_danger = picked;
+        return { ...prev, draft: { ...prev.draft, id_magazin_trash: magObj } };
+      }
+      const targetKey =
+        sid === "characteristic-trash" ? characteristicFkTarget(colKey) : colKey;
+      return { ...prev, draft: { ...prev.draft, [targetKey]: picked } };
+    });
+    setEditingGridRef(null);
+    setGridRefModal(null);
+  };
+
+  const submitGridCard = async () => {
+    if (!gridCard || gridCardSubmitting) return;
+    const { section: sid, mode, draft, rowIndex } = gridCard;
+    const def = getGridDef(sid);
+    setGridCardSubmitting(true);
+    try {
+      if (mode === "create") {
+        const created = await apiPost<Record<string, unknown>>(def.apiPath, def.toRequest(draft));
+        if (sid === "characteristic-trash") {
+          const classObj = magazinClassDangerObject(draft.id_magazin_trash);
+          if (classObj) {
+            await updateCharacteristicClassDanger(
+              { ...draft, id_characteristic_trash: created.id_characteristic_trash },
+              classObj
+            );
+          }
+        }
+        showToast("Добавлено");
+      } else {
+        const id = draft[def.idField];
+        if (typeof id !== "number" || id < 0) throw new Error("Некорректный id записи");
+        if (sid === "characteristic-trash" && rowIndex !== undefined) {
+          const orig = rows[rowIndex];
+          const origClass = magazinClassDangerId(orig?.id_magazin_trash);
+          const newClass = magazinClassDangerId(draft.id_magazin_trash);
+          await apiPut<Record<string, unknown>>(
+            `${def.apiPath}/${id}`,
+            def.toRequest(draft)
+          );
+          if (origClass !== newClass) {
+            await updateCharacteristicClassDanger(
+              draft,
+              magazinClassDangerObject(draft.id_magazin_trash)
+            );
+          }
+        } else {
+          await apiPut<Record<string, unknown>>(`${def.apiPath}/${id}`, def.toRequest(draft));
+        }
+        showToast("Сохранено");
+      }
+      setGridCard(null);
+      await loadSection(sid);
+      void loadRefs();
+      if (sid === "characteristic-trash") void refreshCharacteristicTrashList();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setGridCardSubmitting(false);
+    }
+  };
+
+  const openGridRefFromCard = (colKey: string) => {
+    if (!gridCard) return;
+    const col = getGridDef(gridCard.section).columns.find((c) => c.key === colKey);
+    if (!col?.gridRef) return;
+    setGridRefModal({
+      kind: col.gridRef,
+      colKey,
+      section: gridCard.section,
+      target: "card",
+    });
   };
 
   const characteristicFkTarget = (colKey: string): string => {
@@ -2795,15 +3103,6 @@ export function RhzoApp() {
           ))}
         </nav>
         <div className="info-note" style={{ margin: "12px" }}>
-          <a
-            className="toolbar-link"
-            href="/api/reports/waste/export/csv"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Экспорт отчёта CSV
-          </a>
-          <br />
           <a
             className="toolbar-link"
             href="/api/reports/waste/detailed/export/pdf"
@@ -3364,6 +3663,11 @@ export function RhzoApp() {
                               className="btn-small"
                               onClick={() => {
                                 setObjectCreateDraft(null);
+                                const merged = mergeCharacteristicsIntoObjectRows(
+                                  [rows[idx]],
+                                  characteristicTrashList
+                                )[0];
+                                setObjectCardEditDraft({ ...merged });
                                 setObjectCardRowIndex(idx);
                               }}
                             >
@@ -3455,6 +3759,7 @@ export function RhzoApp() {
                                             rowIndex: idx,
                                             colKey: col.key,
                                             section: sid,
+                                            target: "table",
                                           })
                                         }
                                       >
@@ -3540,6 +3845,7 @@ export function RhzoApp() {
                                             rowIndex: idx,
                                             colKey: col.key,
                                             section: sid,
+                                            target: "table",
                                           });
                                         }}
                                       >
@@ -3664,6 +3970,22 @@ export function RhzoApp() {
                             );
                           })}
                           <td className="col-actions">
+                            {hasGridCard(sid) ? (
+                              <button
+                                type="button"
+                                className="btn-small"
+                                onClick={() => {
+                                  setGridCard({
+                                    section: sid,
+                                    mode: "edit",
+                                    rowIndex: idx,
+                                    draft: { ...row },
+                                  });
+                                }}
+                              >
+                                Карточка
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="btn-small"
@@ -3771,24 +4093,32 @@ export function RhzoApp() {
           kind={gridRefModal.kind}
           rows={gridRefLists[gridRefModal.kind]}
           onClose={() => setGridRefModal(null)}
-          onPick={(picked) =>
-            void applyGridFkAndSave(
-              gridRefModal.rowIndex,
-              gridRefModal.colKey,
-              picked,
-              gridRefModal.section
-            )
-          }
+          onPick={(picked) => {
+            if (gridRefModal.target === "card") {
+              applyGridFkToCardDraft(gridRefModal.colKey, picked);
+            } else if (gridRefModal.rowIndex !== undefined) {
+              void applyGridFkAndSave(
+                gridRefModal.rowIndex,
+                gridRefModal.colKey,
+                picked,
+                gridRefModal.section
+              );
+            }
+          }}
           onCreated={(created) => mergeGridRefIntoCache(gridRefModal.kind, created)}
           showToast={showToast}
           allowClear={GRID_REF_SPECS[gridRefModal.kind].nullable === true}
-          onClear={() =>
-            void applyGridFkClear(
-              gridRefModal.rowIndex,
-              gridRefModal.colKey,
-              gridRefModal.section
-            )
-          }
+          onClear={() => {
+            if (gridRefModal.target === "card") {
+              applyGridFkToCardDraft(gridRefModal.colKey, null);
+            } else if (gridRefModal.rowIndex !== undefined) {
+              void applyGridFkClear(
+                gridRefModal.rowIndex,
+                gridRefModal.colKey,
+                gridRefModal.section
+              );
+            }
+          }}
         />
       )}
 
@@ -3837,6 +4167,29 @@ export function RhzoApp() {
           />
         )}
 
+      {gridCard && (
+        <GridCardModal
+          mode={gridCard.mode}
+          title={
+            gridCard.mode === "create"
+              ? gridCard.section === "magazin-trash"
+                ? "Новый отход"
+                : "Новая характеристика отхода"
+              : gridCard.section === "magazin-trash"
+                ? `Отход — ${gridCellValue(gridCard.draft, { key: "name_trash", label: "" }, gridRefLists) || gridCellValue(gridCard.draft, { key: "code_trash", label: "" }, gridRefLists) || "карточка"}`
+                : `Характеристика отхода — ${gridCellValue(gridCard.draft, { key: "__register", label: "", gridRef: "objectPlaceTrash" }, gridRefLists) || "карточка"}`
+          }
+          draft={gridCard.draft}
+          columns={getGridDef(gridCard.section).columns}
+          getCellValue={(row, col) => gridCellValue(row, col, gridRefLists)}
+          onClose={() => setGridCard(null)}
+          onDraftChange={onGridCardDraftChange}
+          onOpenGridRef={openGridRefFromCard}
+          onSubmit={() => void submitGridCard()}
+          submitting={gridCardSubmitting}
+        />
+      )}
+
       {objectCreateDisplay && (
         <ObjectCardModal
           mode="create"
@@ -3857,15 +4210,16 @@ export function RhzoApp() {
         />
       )}
 
-      {objectCardRowIndex !== null && objectCardRow && (
+      {objectCardRowIndex !== null && objectCardEditDisplay && (
         <ObjectCardModal
           mode="edit"
-          row={objectCardRow}
-          onClose={() => setObjectCardRowIndex(null)}
+          row={objectCardEditDisplay}
+          onClose={() => {
+            setObjectCardRowIndex(null);
+            setObjectCardEditDraft(null);
+          }}
           getCellValue={getObjectCellValue}
-          onFieldChange={(colKey, value, type) =>
-            onObjectFieldBlur(objectCardRowIndex, colKey, value, type)
-          }
+          onFieldChange={onObjectEditFieldChange}
           onOpenRef={(kind, colKey) => openRefModal(kind, objectCardRowIndex, colKey)}
           onOpenPhones={(kind) =>
             setPhoneModal({ target: "row", rowIndex: objectCardRowIndex, kind })
@@ -3875,6 +4229,8 @@ export function RhzoApp() {
             void loadObjectRelation(objectCardRowIndex, kind);
             void loadGlobalRelationLists();
           }}
+          onSubmit={() => void submitObjectEdit()}
+          submitting={objectEditSubmitting}
         />
       )}
 
