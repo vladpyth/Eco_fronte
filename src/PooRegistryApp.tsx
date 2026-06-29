@@ -18,10 +18,13 @@ import {
 } from "./rooSectionsConfig";
 
 export type PooRegistryAppProps = {
-  apiModule: Extract<ApiModule, "roo" | "roio">;
+  apiModule: Extract<ApiModule, "roo" | "roio" | "ponoinput">;
   sidebarTitle: string;
   colWidthsStorageKey: string;
   myTrashStorageKey: string;
+  sectionOrder?: RooSectionId[];
+  getSection?: (id: RooSectionId) => import("./rooSectionsConfig").RooSectionDef;
+  cardSectionIds?: string[];
 };
 
 export function PooRegistryApp(props: PooRegistryAppProps) {
@@ -47,13 +50,18 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
     return out;
   }, []);
 
+  const sectionOrder = props.sectionOrder ?? ROO_SECTION_ORDER;
+  const resolveSection = props.getSection ?? getRooSection;
+  const cardSectionIds =
+    props.cardSectionIds ?? ["magasin-factory", "my-trash", "drop-air", "magazin-trash"];
+
   return (
     <GridRegistryApp
       sidebarTitle={props.sidebarTitle}
       colWidthsStorageKey={props.colWidthsStorageKey}
       defaultSection="magasin-factory"
-      sectionOrder={ROO_SECTION_ORDER}
-      getSection={(id) => getRooSection(id as RooSectionId)}
+      sectionOrder={sectionOrder}
+      getSection={(id) => resolveSection(id as RooSectionId)}
       gridRefSpecs={ROO_GRID_REF_SPECS}
       cellValue={(row, col, cache) =>
         rooCellValue(row, col as RooCol, cache as Record<RooGridRefKind, Record<string, unknown>[]> | undefined)
@@ -74,7 +82,7 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
       handleGridRefAction={(action, sectionId, col, row, picked) =>
         handleRooGridRefAction(action, sectionId, col as RooCol, row, picked)
       }
-      cardSectionIds={["magasin-factory", "my-trash", "drop-air", "magazin-trash"]}
+      cardSectionIds={cardSectionIds}
       sidebarReportLinks={[
         { href: resolveApiPath("/api/reports/pdf"), label: "Экспорт отчёта PDF" },
       ]}

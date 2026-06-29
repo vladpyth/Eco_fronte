@@ -368,6 +368,17 @@ body {
   border-bottom-color: #52525b;
 }
 
+.object-card-textarea {
+  min-height: 56px;
+  max-height: 320px;
+  overflow-y: auto !important;
+  resize: vertical;
+}
+
+.object-card-value .cell-textarea {
+  width: 100%;
+}
+
 .cell-readonly-inline {
   display: block;
   padding: 6px 4px;

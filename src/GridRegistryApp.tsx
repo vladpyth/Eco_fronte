@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiDelete, apiGet, apiPost, apiPut, getNestedId } from "./api";
+import { AutoResizeTextarea } from "./AutoResizeTextarea";
 import { GridCardModal } from "./GridCardModal";
 import "./App.css";
 
@@ -12,6 +13,7 @@ type GridCol = {
   label: string;
   type?: "text" | "number" | "float" | "bool" | "date";
   readOnly?: boolean;
+  multiline?: boolean;
   format?: (row: Record<string, unknown>) => string;
   gridRef?: string;
   phoneUrOb?: 0 | 1;
@@ -385,10 +387,15 @@ function GridValueCell(props: {
   }
   const defVal = gridInputDefault(row, col, cellValue);
   const commitBlur = (raw: string) => onCommit({ ...row, [col.key]: parseGridInput(raw, col, row) });
-  if (singleCol) {
+  if (singleCol || col.multiline) {
     return td(
-      <textarea key={`${str(row[idField])}-${col.key}-${defVal}`} className="cell-textarea" defaultValue={defVal} rows={2}
-        onBlur={(e) => commitBlur(e.target.value)} />
+      <AutoResizeTextarea
+        key={`${str(row[idField])}-${col.key}-${defVal}`}
+        className="cell-textarea"
+        value={defVal}
+        minRows={singleCol ? 2 : 2}
+        onBlur={commitBlur}
+      />
     );
   }
   const inputType = col.type === "number" ? "number" : col.type === "date" ? "date" : "text";

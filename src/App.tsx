@@ -9,6 +9,7 @@ import { setApiModule } from "./apiModule";
 import { RhzoApp } from "./RhzoApp";
 import { RooApp } from "./RooApp";
 import { RoioApp } from "./RoioApp";
+import { PonoinputApp } from "./PonoinputApp";
 import "./App.css";
 
 export default function App() {
@@ -43,7 +44,15 @@ export default function App() {
           );
         })}
       </nav>
-      {module === "rhzo" ? <RhzoApp /> : module === "roo" ? <RooApp /> : <RoioApp />}
+      {module === "rhzo" ? (
+        <RhzoApp />
+      ) : module === "roo" ? (
+        <RooApp />
+      ) : module === "roio" ? (
+        <RoioApp />
+      ) : (
+        <PonoinputApp />
+      )}
     </div>
   );
 }

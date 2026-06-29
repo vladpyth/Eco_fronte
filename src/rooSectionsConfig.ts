@@ -23,6 +23,7 @@ export type RooCol = {
   label: string;
   type?: "text" | "number" | "float" | "bool" | "date";
   readOnly?: boolean;
+  multiline?: boolean;
   format?: (row: Record<string, unknown>) => string;
   gridRef?: RooGridRefKind;
   /** Подпись в ячейке для gridRef (без изменения списка в модалке справочника). */
@@ -190,19 +191,19 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     title: "Справочник предприятий (MagasinFactory)",
     sidebar: "Предприятия",
     columns: [
-      { key: "id_registration", label: "Регистрационный номер", type: "text" },
+      { key: "id_registration", label: "Регистрационный номер", type: "text", multiline: false },
       { key: "date_register", label: "Дата регистрации", type: "date" },
-      { key: "name_obj", label: "Наименование объекта", type: "text" },
-      { key: "name_own", label: "Наименование собственника", type: "text" },
-      { key: "YNP", label: "УНП", type: "text" },
-      { key: "address_own", label: "Сведения о собственнике: адрес", type: "text" },
+      { key: "name_obj", label: "Наименование объекта", type: "text", multiline: true },
+      { key: "name_own", label: "Наименование собственника", type: "text", multiline: true },
+      { key: "YNP", label: "УНП", type: "text", multiline: false },
+      { key: "address_own", label: "Сведения о собственнике: адрес", type: "text", multiline: true },
       {
         key: "__phones_legal",
         label: "Сведения о собственнике: телефон",
         gridRef: "numberPhone",
         phoneUrOb: 0,
       },
-      { key: "address_obj", label: "Адрес объекта", type: "text" },
+      { key: "address_obj", label: "Адрес объекта", type: "text", multiline: true },
       {
         key: "__phones_owner",
         label: "Телефон объекта",
@@ -222,22 +223,22 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
         readOnly: true,
         format: formatFactoryDistrict,
       },
-      { key: "develop_organization", label: "Организация-разработчик проекта", type: "text" },
-      { key: "confirmed_project", label: "Утвердил проект", type: "text" },
+      { key: "develop_organization", label: "Организация-разработчик проекта", type: "text", multiline: true },
+      { key: "confirmed_project", label: "Утвердил проект", type: "text", multiline: true },
       { key: "date_approve", label: "Дата утверждения", type: "date" },
       { key: "conclusion_documentation", label: "Орган выдавший заключение", type: "bool" },
-      { key: "act_use", label: "Акт ввода в эксплуатацию", type: "text" },
+      { key: "act_use", label: "Акт ввода в эксплуатацию", type: "text", multiline: true },
       {
         key: "id_short_discribe_technology",
         label: "Краткое описание технологии",
         gridRef: "shortDiscribeTechnology",
       },
-      { key: "requirements_acts", label: "Требования по актам", type: "text" },
+      { key: "requirements_acts", label: "Требования по актам", type: "text", multiline: true },
       { key: "obj_use_trash", label: "Предпр. использ. собственные отходы", type: "bool" },
       { key: "obj_accept_trash", label: "Предпр. принимает от др.", type: "bool" },
-      { key: "character_prod", label: "Характер продукции", type: "text" },
-      { key: "project_power_yer", label: "Проектная мощность, т/год", type: "text" },
-      { key: "project_power_hr", label: "Проектная мощность, кг/час", type: "text" },
+      { key: "character_prod", label: "Характер продукции", type: "text", multiline: true },
+      { key: "project_power_yer", label: "Проектная мощность, т/год", type: "text", multiline: true },
+      { key: "project_power_hr", label: "Проектная мощность, кг/час", type: "text", multiline: true },
       { key: "value", label: "Количество объектов", type: "number" },
     ],
     toRequest: magasinFactoryToRequest,
@@ -337,7 +338,7 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     sidebar: "Справочник отходов",
     columns: [
       { key: "code_trash", label: "Код отхода", type: "number" },
-      { key: "name_trash", label: "Наименование отхода", type: "text" },
+      { key: "name_trash", label: "Наименование отхода", type: "text", multiline: true },
       { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
     ],
     toRequest: (row) => ({
@@ -422,7 +423,7 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     idField: "id_short_discribe_technology",
     title: "Краткое описание технологии (ShortDiscribeTechnology)",
     sidebar: "Описание технологии",
-    columns: [{ key: "technology", label: "Описание", type: "text" }],
+    columns: [{ key: "technology", label: "Описание", type: "text", multiline: true }],
     toRequest: (row) => ({ technology: S(row.technology).trim() || "Технология" }),
     createDefault: async () => ({ technology: "Новая технология" }),
   },
@@ -431,7 +432,7 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     idField: "id_name_grope_air",
     title: "Наименования выбросов (NameDropAirTrash)",
     sidebar: "Наим. выбросов",
-    columns: [{ key: "name_drop_air_trash", label: "Наименование", type: "text" }],
+    columns: [{ key: "name_drop_air_trash", label: "Наименование", type: "text", multiline: true }],
     toRequest: (row) => ({
       name_drop_air_trash: S(row.name_drop_air_trash).trim() || "Выброс",
     }),

@@ -1,4 +1,4 @@
-export type AppModule = "rhzo" | "roo" | "roio";
+export type AppModule = "rhzo" | "roo" | "roio" | "ponoinput";
 
 export const APP_MODULE_LS = "eco-service-app-module";
 
@@ -18,15 +18,20 @@ export const APP_MODULE_META: Record<
   },
   roio: {
     label: "РОИО",
-    sidebarTitle: "Реестр объектов исключений (обращение с отходами)",
-    pageHint: "Исключения: предприятия, отходы, выбросы и справочники",
+    sidebarTitle: "Реестр объектов по использованию отходов",
+    pageHint: "Реестр объектов по использованию отходов",
+  },
+  ponoinput: {
+    label: "РОИО (для внесения)",
+    sidebarTitle: "Реестр объектов по использованию отходов",
+    pageHint: "Реестр объектов по использованию отходов",
   },
 };
 
 export function loadAppModule(): AppModule {
   try {
     const raw = localStorage.getItem(APP_MODULE_LS);
-    if (raw === "rhzo" || raw === "roo" || raw === "roio") return raw;
+    if (raw === "rhzo" || raw === "roo" || raw === "roio" || raw === "ponoinput") return raw;
   } catch {
     /* ignore */
   }

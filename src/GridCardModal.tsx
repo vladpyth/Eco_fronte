@@ -1,8 +1,11 @@
+import { AutoResizeTextarea } from "./AutoResizeTextarea";
+
 export type GridCardCol = {
   key: string;
   label: string;
   type?: "text" | "number" | "float" | "bool" | "date";
   readOnly?: boolean;
+  multiline?: boolean;
   format?: (row: Record<string, unknown>) => string;
   gridRef?: string;
 };
@@ -108,26 +111,52 @@ export function GridCardModal(props: GridCardModalProps) {
               );
             }
 
+            if (col.type === "number" || col.type === "float" || col.type === "date") {
+              return (
+                <div key={col.key} className="object-card-field">
+                  <label className="object-card-label">{col.label}</label>
+                  <div className="object-card-value">
+                    <input
+                      className="cell-input-minimal"
+                      style={{ width: "100%" }}
+                      value={v}
+                      type={col.type === "date" ? "date" : "number"}
+                      step={col.type === "float" ? "any" : undefined}
+                      onChange={(e) =>
+                        onDraftChange(col.key, e.target.value, col.type)
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            }
+
+            const useMultiline = col.multiline !== false && col.type !== "number" && col.type !== "float";
+
             return (
               <div key={col.key} className="object-card-field">
                 <label className="object-card-label">{col.label}</label>
                 <div className="object-card-value">
-                  <input
-                    className="cell-input-minimal"
-                    style={{ width: "100%" }}
-                    value={v}
-                    type={
-                      col.type === "number" || col.type === "float"
-                        ? "number"
-                        : col.type === "date"
-                          ? "date"
-                          : "text"
-                    }
-                    step={col.type === "float" ? "any" : undefined}
-                    onChange={(e) =>
-                      onDraftChange(col.key, e.target.value, col.type ?? "text")
-                    }
-                  />
+                  {useMultiline ? (
+                    <AutoResizeTextarea
+                      className="cell-textarea object-card-textarea"
+                      value={v}
+                      minRows={2}
+                      onChange={(next) =>
+                        onDraftChange(col.key, next, col.type ?? "text")
+                      }
+                    />
+                  ) : (
+                    <input
+                      className="cell-input-minimal"
+                      style={{ width: "100%" }}
+                      value={v}
+                      type="text"
+                      onChange={(e) =>
+                        onDraftChange(col.key, e.target.value, col.type ?? "text")
+                      }
+                    />
+                  )}
                 </div>
               </div>
             );
