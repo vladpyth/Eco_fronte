@@ -89,6 +89,15 @@ export function pickFk(val: unknown, nestedIdField: string): number {
   return getNestedId(val, nestedIdField) ?? 0;
 }
 
+/** FK для API: пустой выбор → null (не 0 — иначе бэкенд ищет id=0). */
+export function pickFkOrNull(
+  val: unknown,
+  nestedIdField: string
+): number | null {
+  const id = pickFk(val, nestedIdField);
+  return id > 0 ? id : null;
+}
+
 function optStr(row: Record<string, unknown>, key: string): string | undefined {
   const v = row[key];
   if (v === null || v === undefined || v === "") return undefined;
@@ -276,22 +285,21 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
       { key: "value_trash", label: "Количество, т", type: "float" },
     ],
     toRequest: (row) => ({
-      id_class_danger: pickFk(row.id_class_danger, "id_class_danger"),
-      id_magazin_trash: pickFk(row.id_magazin_trash, "id_magazin_trash"),
-      id_magasin_factory: pickFk(row.id_magasin_factory, "id_magasin_factory"),
+      id_class_danger: pickFkOrNull(row.id_class_danger, "id_class_danger"),
+      id_magazin_trash: pickFkOrNull(row.id_magazin_trash, "id_magazin_trash"),
+      id_magasin_factory: pickFkOrNull(row.id_magasin_factory, "id_magasin_factory"),
       value_trash: Number(row.value_trash ?? 0),
     }),
     createDefault: async () => {
-      const [factories, classes, trash] = await Promise.all([
+      const [factories, trash] = await Promise.all([
         apiGet<Record<string, unknown>[]>("/api/magasin-factory"),
-        apiGet<Record<string, unknown>[]>("/api/class-danger"),
         apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
       ]);
       return {
-        id_magasin_factory: pickFk(factories[0], "id_magasin_factory"),
-        id_class_danger: pickFk(classes[0], "id_class_danger"),
-        id_magazin_trash: pickFk(trash[0], "id_magazin_trash"),
-        value_trash: 1,
+        id_magasin_factory: pickFkOrNull(factories[0], "id_magasin_factory"),
+        id_class_danger: null,
+        id_magazin_trash: pickFkOrNull(trash[0], "id_magazin_trash"),
+        value_trash: 0,
       };
     },
   },

@@ -1,4 +1,5 @@
 import { PooRegistryApp } from "./PooRegistryApp";
+import { RoioFactoryHub } from "./RoioFactoryHub";
 import {
   PONOINPUT_SECTION_ORDER,
   getPonoinputSection,
@@ -19,6 +20,16 @@ export function PonoinputApp() {
         "technology",
         "drop-air",
         "magazin-trash",
+      ]}
+      pagination={{ pageSize: 50, pageSizeOptions: [25, 50, 100, 200], mode: "server" }}
+      defaultSection="factory-hub"
+      leadingSections={[
+        {
+          id: "factory-hub",
+          sidebar: "Паспорт предприятия",
+          title: "Паспорт предприятия",
+          render: () => <RoioFactoryHub variant="ponoinput" />,
+        },
       ]}
     />
   );

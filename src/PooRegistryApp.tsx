@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
 import { apiGet } from "./api";
 import { resolveApiPath, setApiModule, type ApiModule } from "./apiModule";
 import { GridRegistryApp } from "./GridRegistryApp";
@@ -25,6 +25,15 @@ export type PooRegistryAppProps = {
   sectionOrder?: RooSectionId[];
   getSection?: (id: RooSectionId) => import("./rooSectionsConfig").RooSectionDef;
   cardSectionIds?: string[];
+  /** Пагинация таблиц (mode: "server" — page/size/q на бэке). */
+  pagination?: boolean | { pageSize?: number; pageSizeOptions?: number[]; mode?: "client" | "server" };
+  defaultSection?: string;
+  leadingSections?: Array<{
+    id: string;
+    sidebar: string;
+    title: string;
+    render: () => ReactNode;
+  }>;
 };
 
 export function PooRegistryApp(props: PooRegistryAppProps) {
@@ -39,7 +48,7 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
         const spec = ROO_GRID_REF_SPECS[kind];
         try {
           const list = await apiGet<Record<string, unknown>[]>(spec.apiPath);
-          return [kind, Array.isArray(list) ? list : []] as const;
+          return [kind, Array.isArray(list) ? list : ([] as Record<string, unknown>[])] as const;
         } catch {
           return [kind, []] as const;
         }
@@ -59,7 +68,7 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
     <GridRegistryApp
       sidebarTitle={props.sidebarTitle}
       colWidthsStorageKey={props.colWidthsStorageKey}
-      defaultSection="magasin-factory"
+      defaultSection={props.defaultSection ?? "magasin-factory"}
       sectionOrder={sectionOrder}
       getSection={(id) => resolveSection(id as RooSectionId)}
       gridRefSpecs={ROO_GRID_REF_SPECS}
@@ -83,6 +92,8 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
         handleRooGridRefAction(action, sectionId, col as RooCol, row, picked)
       }
       cardSectionIds={cardSectionIds}
+      pagination={props.pagination}
+      leadingSections={props.leadingSections}
       sidebarReportLinks={[
         { href: resolveApiPath("/api/reports/pdf"), label: "Экспорт отчёта PDF" },
       ]}

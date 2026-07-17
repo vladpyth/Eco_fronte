@@ -5,6 +5,8 @@ import { GridCardModal } from "./GridCardModal";
 import "./App.css";
 
 const DEFAULT_COL_WIDTH = 148;
+const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const AC_LIST_STYLE = { position: "absolute" as const, top: "100%", left: 0, right: 32 };
 const FLEX_ROW = { display: "flex", justifyContent: "space-between", alignItems: "center" };
 
@@ -78,6 +80,24 @@ export type GridRegistryAppProps = {
   cardSectionIds?: string[];
   /** Ссылки на экспорт отчётов внизу бокового меню. */
   sidebarReportLinks?: { href: string; label: string }[];
+  /**
+   * Пагинация таблиц.
+   * mode: "server" — грузит ?page=&size=&q= с бэка; "client" (по умолчанию) — режет уже загруженный список.
+   */
+  pagination?: boolean | { pageSize?: number; pageSizeOptions?: number[]; mode?: "client" | "server" };
+  /** Пункты сайдбара перед обычными разделами (кастомный UI). */
+  leadingSections?: Array<{
+    id: string;
+    sidebar: string;
+    title: string;
+    render: () => ReactNode;
+  }>;
+};
+
+type PagePayload<T> = {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
 };
 
 type UiState = { searchQuery: string; sortColumn: string | null; sortDirection: "asc" | "desc" };
@@ -417,15 +437,35 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     handleGridRefAction,
     cardSectionIds,
   } = props;
+  const leadingSections = props.leadingSections ?? [];
+  const paginationEnabled = Boolean(props.pagination);
+  const serverPagination =
+    typeof props.pagination === "object" && props.pagination.mode === "server";
+  const pageSizeOptions = useMemo(() => {
+    if (typeof props.pagination === "object" && props.pagination.pageSizeOptions?.length) {
+      return props.pagination.pageSizeOptions;
+    }
+    return DEFAULT_PAGE_SIZE_OPTIONS;
+  }, [props.pagination]);
+  const initialPageSize = useMemo(() => {
+    if (typeof props.pagination === "object" && props.pagination.pageSize) {
+      return props.pagination.pageSize;
+    }
+    return DEFAULT_PAGE_SIZE;
+  }, [props.pagination]);
   const cardSections = useMemo(() => new Set(cardSectionIds ?? []), [cardSectionIds]);
   const hasCardForm = cardSections.has.bind(cardSections);
   const [section, setSection] = useState(props.defaultSection);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [totalElements, setTotalElements] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ui, setUi] = useState<UiState>({ searchQuery: "", sortColumn: null, sortDirection: "asc" });
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
   const [colWidths, setColWidths] = useState(() => loadColWidths(colWidthsStorageKey));
   const [gridRefLists, setGridRefLists] = useState<Record<string, Record<string, unknown>[]>>({});
   const gridRefListsRef = useRef(gridRefLists);
@@ -444,7 +484,22 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     try { localStorage.setItem(colWidthsStorageKey, JSON.stringify(colWidths)); } catch { /* ignore */ }
   }, [colWidths, colWidthsStorageKey]);
 
-  const sectionDef = useMemo(() => getSection(section), [getSection, section]);
+  const sectionDef = useMemo(() => {
+    const lead = leadingSections.find((s) => s.id === section);
+    if (lead) {
+      return {
+        apiPath: "",
+        idField: "id",
+        title: lead.title,
+        sidebar: lead.sidebar,
+        columns: [] as GridCol[],
+        toRequest: () => ({}),
+        createDefault: async () => ({}),
+      };
+    }
+    return getSection(section);
+  }, [getSection, section, leadingSections]);
+  const isLeadingSection = leadingSections.some((s) => s.id === section);
   const { columns: gridColumns, idField } = sectionDef;
   const singleColSection = gridColumns.length === 1;
 
@@ -489,8 +544,25 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiGet<Record<string, unknown>[]>(def.apiPath);
-      let loaded = Array.isArray(data) ? data : [];
+      let loaded: Record<string, unknown>[] = [];
+      if (serverPagination) {
+        const params = new URLSearchParams({
+          page: String(Math.max(0, page - 1)),
+          size: String(pageSize),
+        });
+        if (debouncedQ) params.set("q", debouncedQ);
+        if (ui.sortColumn) {
+          params.set("sort", ui.sortColumn);
+          params.set("dir", ui.sortDirection);
+        }
+        const data = await apiGet<PagePayload<Record<string, unknown>>>(`${def.apiPath}?${params}`);
+        loaded = Array.isArray(data.content) ? data.content : [];
+        setTotalElements(typeof data.totalElements === "number" ? data.totalElements : loaded.length);
+      } else {
+        const data = await apiGet<Record<string, unknown>[]>(def.apiPath);
+        loaded = Array.isArray(data) ? data : [];
+        setTotalElements(loaded.length);
+      }
       if (enrichLoadedRows) {
         loaded = enrichLoadedRows(sid, loaded, gridRefListsRef.current);
       }
@@ -498,14 +570,31 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка загрузки");
       setRows([]);
+      setTotalElements(0);
     } finally {
       setLoading(false);
     }
-  }, [getSection, enrichLoadedRows]);
+  }, [getSection, enrichLoadedRows, serverPagination, page, pageSize, debouncedQ, ui.sortColumn, ui.sortDirection]);
 
-  useEffect(() => { void loadSection(section); }, [section, loadSection]);
+  useEffect(() => {
+    if (!serverPagination) return;
+    const t = setTimeout(() => setDebouncedQ(ui.searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [ui.searchQuery, serverPagination]);
+
+  useEffect(() => {
+    if (isLeadingSection) return;
+    void loadSection(section);
+  }, [section, loadSection, isLeadingSection]);
   useEffect(() => { void refreshGridRefLists(); }, [refreshGridRefLists]);
-  useEffect(() => { setEditingGridRef(null); setGridRefModal(null); setGridCard(null); }, [section]);
+  useEffect(() => {
+    setEditingGridRef(null);
+    setGridRefModal(null);
+    setGridCard(null);
+    setPage(1);
+    setDebouncedQ("");
+  }, [section]);
+  useEffect(() => { setPage(1); }, [ui.searchQuery, ui.sortColumn, ui.sortDirection, pageSize]);
 
   useEffect(() => {
     if (!enrichLoadedRows) return;
@@ -513,19 +602,41 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
       if (prev.length === 0) return prev;
       return enrichLoadedRows(section, prev, gridRefLists);
     });
-  }, [gridRefLists, enrichLoadedRows]);
+  }, [gridRefLists, enrichLoadedRows, section]);
 
   const gridUsesGridRef = gridColumns.some((c) => c.gridRef);
-  const displayRows = useMemo(() => {
+  const filteredRows = useMemo(() => {
+    // Сервер уже отфильтровал и отсортировал по всей таблице
+    if (serverPagination) return rows;
     const keys = gridColumns.map((c) => c.key);
     const cache = gridUsesGridRef ? gridRefLists : undefined;
     return filterAndSortData(rows, keys, ui, (r, k) => {
       const col = gridColumns.find((c) => c.key === k);
       return col ? cellValue(r, col, cache) : "";
     }, idField);
-  }, [rows, gridColumns, ui, cellValue, gridUsesGridRef, gridRefLists, idField]);
+  }, [rows, gridColumns, ui, cellValue, gridUsesGridRef, gridRefLists, idField, serverPagination]);
 
-  const clearFilters = () => setUi({ searchQuery: "", sortColumn: null, sortDirection: "asc" });
+  const totalPages = Math.max(
+    1,
+    serverPagination
+      ? Math.ceil(totalElements / pageSize) || 1
+      : Math.ceil(filteredRows.length / pageSize) || 1
+  );
+  const safePage = Math.min(page, totalPages);
+  const displayRows = useMemo(() => {
+    if (serverPagination || !paginationEnabled) return filteredRows;
+    const start = (safePage - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [paginationEnabled, serverPagination, filteredRows, safePage, pageSize]);
+
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
+
+  const clearFilters = () => {
+    setUi({ searchQuery: "", sortColumn: null, sortDirection: "asc" });
+    setPage(1);
+  };
   const switchSection = (s: string) => {
     setSection(s);
     setGridCard(null);
@@ -801,6 +912,16 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
       <aside className="sidebar">
         <div className="sidebar-header">{props.sidebarTitle}</div>
         <nav className="table-list">
+          {leadingSections.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={`table-item ${section === s.id ? "active" : ""}`}
+              onClick={() => switchSection(s.id)}
+            >
+              {s.sidebar}
+            </button>
+          ))}
           {props.sectionOrder.map((id) => (
             <button key={id} type="button" className={`table-item ${section === id ? "active" : ""}`} onClick={() => switchSection(id)}>
               {getSection(id).sidebar}
@@ -822,6 +943,10 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
       </aside>
 
       <main className="main-content">
+        {isLeadingSection ? (
+          leadingSections.find((s) => s.id === section)?.render() ?? null
+        ) : (
+          <>
         <h1 className="page-title">{sectionDef.title}</h1>
         {error && <div className="error-banner">{error}</div>}
         <div className="toolbar">
@@ -905,14 +1030,103 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                 </tbody>
               </table>
             </div>
-            <div className="info-note">
-              Показано {displayRows.length} из {rows.length} записей. Горизонтальная прокрутка — для широких таблиц.
+            <div className="info-note" style={FLEX_ROW}>
+              <span>
+                {paginationEnabled
+                  ? serverPagination
+                    ? `Показано ${displayRows.length} на стр. ${safePage} из ${totalPages} · всего ${totalElements}`
+                    : `Показано ${displayRows.length} на стр. ${safePage} из ${totalPages} · всего ${filteredRows.length} (загружено ${rows.length})`
+                  : `Показано ${displayRows.length} из ${rows.length} записей. Горизонтальная прокрутка — для широких таблиц.`}
+              </span>
+              {paginationEnabled ? (
+                <div className="pagination" role="navigation" aria-label="Страницы таблицы">
+                  <label className="pagination-size">
+                    На странице
+                    <select
+                      value={pageSize}
+                      onChange={(e) => setPageSize(Number(e.target.value))}
+                    >
+                      {pageSizeOptions.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-small"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage(1)}
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-small"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    ‹
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => {
+                      if (totalPages <= 7) return true;
+                      if (p === 1 || p === totalPages) return true;
+                      return Math.abs(p - safePage) <= 1;
+                    })
+                    .reduce<(number | "…")[]>((acc, p, idx, arr) => {
+                      if (idx > 0) {
+                        const prev = arr[idx - 1];
+                        if (typeof prev === "number" && p - prev > 1) acc.push("…");
+                      }
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) =>
+                      p === "…" ? (
+                        <span key={`e${i}`} className="pagination-ellipsis">
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={p}
+                          type="button"
+                          className={`btn-small${p === safePage ? " pagination-current" : ""}`}
+                          onClick={() => setPage(p)}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+                  <button
+                    type="button"
+                    className="btn-small"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    ›
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-small"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPage(totalPages)}
+                  >
+                    »
+                  </button>
+                </div>
+              ) : null}
             </div>
           </>
         )}
-        <button type="button" className="floating-add-btn" onClick={triggerAddRow}>
-          {hasCardForm(section) ? "Добавить" : "Добавить строку"}
-        </button>
+        {!isLeadingSection ? (
+          <button type="button" className="floating-add-btn" onClick={triggerAddRow}>
+            {hasCardForm(section) ? "Добавить" : "Добавить строку"}
+          </button>
+        ) : null}
+          </>
+        )}
       </main>
 
       {gridRefModal && modalSpec && (
