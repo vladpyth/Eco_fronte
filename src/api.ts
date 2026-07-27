@@ -273,6 +273,11 @@ export function formatCity(c: unknown): string {
   return strOrEmpty(district?.name_district);
 }
 
+export function formatRegion(r: unknown): string {
+  if (!r || typeof r !== "object") return "";
+  return strOrEmpty((r as Record<string, unknown>).name_region);
+}
+
 export function formatGroupPlace(g: unknown): string {
   if (!g || typeof g !== "object") return "";
   const o = g as Record<string, unknown>;

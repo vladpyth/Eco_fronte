@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { apiDelete, apiGet, apiPost, apiPut, formatCity, formatDegree, formatGroupPlace, formatStorage, getNestedId, objectPlaceTrashToRequest } from "./api";
+import { apiDelete, apiGet, apiPost, apiPut, formatCity, formatDegree, formatGroupPlace, formatRegion, formatStorage, getNestedId, objectPlaceTrashToRequest } from "./api";
 import { ExcludeFilterControl } from "./ExcludeFilterControl";
 import "./RoioFactoryHub.css";
 
@@ -53,6 +53,7 @@ type Baseline = {
 };
 
 type RefLists = {
+  region: Record<string, unknown>[];
   cities: Record<string, unknown>[];
   group: Record<string, unknown>[];
   storage: Record<string, unknown>[];
@@ -85,6 +86,7 @@ const OBJECT_FIELDS: {
   { key: "name_own", label: "Наименование собственника", type: "textarea", required: true },
   { key: "company_located", label: "Юридический адрес собственника", type: "textarea" },
   { key: "place_obj", label: "Местонахождение объекта", type: "textarea" },
+  { key: "id_region", label: "Область", type: "ref", ref: "region" },
   { key: "id_cities", label: "Район / город", type: "ref", ref: "cities" },
   { key: "id_group_place_save", label: "Наименование группы", type: "ref", ref: "group" },
   { key: "id_storage_scheme", label: "Схема складирования", type: "ref", ref: "storage" },
@@ -588,6 +590,7 @@ export function RhzoObjectHub() {
   const [formBusy, setFormBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refs, setRefs] = useState<RefLists>({
+    region: [],
     cities: [],
     group: [],
     storage: [],
@@ -656,6 +659,7 @@ export function RhzoObjectHub() {
   useEffect(() => {
     void (async () => {
       const paths: [keyof RefLists, string][] = [
+        ["region", "/api/region"],
         ["cities", "/api/cities"],
         ["group", "/api/group-place-save"],
         ["storage", "/api/storage-scheme"],
@@ -664,6 +668,7 @@ export function RhzoObjectHub() {
         ["physicalState", "/api/physical-state"],
       ];
       const next: RefLists = {
+        region: [],
         cities: [],
         group: [],
         storage: [],
@@ -1024,23 +1029,27 @@ export function RhzoObjectHub() {
 
                     if (f.type === "ref" && f.ref) {
                       const idField =
-                        f.ref === "cities"
-                          ? "id_cities"
-                          : f.ref === "group"
-                            ? "id_group_place_save"
-                            : f.ref === "storage"
-                              ? "id_storage_scheme"
-                              : f.ref === "degree"
-                                ? "id_gruops_degree"
-                                : "id";
+                        f.ref === "region"
+                          ? "id_region"
+                          : f.ref === "cities"
+                            ? "id_cities"
+                            : f.ref === "group"
+                              ? "id_group_place_save"
+                              : f.ref === "storage"
+                                ? "id_storage_scheme"
+                                : f.ref === "degree"
+                                  ? "id_gruops_degree"
+                                  : "id";
                       const labelFn =
-                        f.ref === "cities"
-                          ? (r: Record<string, unknown>) => formatCity(r) || str(r.name_cities)
-                          : f.ref === "group"
-                            ? (r: Record<string, unknown>) => formatGroupPlace(r)
-                            : f.ref === "storage"
-                              ? (r: Record<string, unknown>) => formatStorage(r)
-                              : (r: Record<string, unknown>) => formatDegree(r);
+                        f.ref === "region"
+                          ? (r: Record<string, unknown>) => formatRegion(r)
+                          : f.ref === "cities"
+                            ? (r: Record<string, unknown>) => formatCity(r) || str(r.name_cities)
+                            : f.ref === "group"
+                              ? (r: Record<string, unknown>) => formatGroupPlace(r)
+                              : f.ref === "storage"
+                                ? (r: Record<string, unknown>) => formatStorage(r)
+                                : (r: Record<string, unknown>) => formatDegree(r);
                       const opts = refOptions(f.ref, idField, labelFn);
                       return (
                         <div key={f.key} className="hub-field">

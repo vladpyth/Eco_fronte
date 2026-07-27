@@ -9,6 +9,7 @@ import {
   formatCity,
   formatDegree,
   formatGroupPlace,
+  formatRegion,
   formatStorage,
   getNestedId,
   objectPlaceTrashToRequest,
@@ -343,7 +344,7 @@ function getObjectCellValue(row: Record<string, unknown>, key: string): string {
           ? (row.id_cities as Record<string, unknown>)
           : null;
       const regionFromCity = city?.id_region;
-      return formatGroupPlace(row.id_region ?? regionFromCity);
+      return formatRegion(row.id_region ?? regionFromCity);
     }
     case "__city":
       return formatCity(row.id_cities);
