@@ -605,7 +605,8 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
       setForm(null);
       void loadList();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Ошибка сохранения", "err");
+      const msg = e instanceof Error ? e.message : "";
+      showToast(msg || "Ошибка сохранения", "err");
     } finally {
       setSaving(false);
     }

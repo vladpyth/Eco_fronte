@@ -86,6 +86,10 @@ function S(v: unknown): string {
 
 export function pickFk(val: unknown, nestedIdField: string): number {
   if (typeof val === "number" && Number.isFinite(val)) return val;
+  if (typeof val === "string" && val.trim() !== "") {
+    const n = Number(val);
+    if (Number.isFinite(n)) return n;
+  }
   return getNestedId(val, nestedIdField) ?? 0;
 }
 
@@ -508,11 +512,11 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
     sidebar: "Телефоны",
     columns: [{ key: "number", label: "Номер", type: "text" }],
     toRequest: (row) => ({
-      number: S(row.number).trim() || "+375000000000",
+      number: S(row.number).trim() || "нет",
       ur_ob: 0,
     }),
     createDefault: async () => ({
-      number: "+375000000000",
+      number: "нет",
       ur_ob: 0,
     }),
   },

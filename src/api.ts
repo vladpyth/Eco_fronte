@@ -62,11 +62,21 @@ async function parseJsonBody<T>(res: Response, text: string): Promise<T> {
   }
 }
 
+async function requestError(
+  method: string,
+  path: string,
+  res: Response,
+  text: string
+): Promise<Error> {
+  const message = await parseErrorMessage(res, text);
+  return new Error(`${method} ${path}: ${message}`);
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const url = resolveApiPath(path);
   const res = await fetch(url);
   const text = await readBodyAsText(res);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  if (!res.ok) throw await requestError("GET", path, res, text);
   return parseJsonBody<T>(res, text);
 }
 
@@ -78,7 +88,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const text = await readBodyAsText(res);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  if (!res.ok) throw await requestError("POST", path, res, text);
   return parseJsonBody<T>(res, text);
 }
 
@@ -90,7 +100,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const text = await readBodyAsText(res);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  if (!res.ok) throw await requestError("PUT", path, res, text);
   return parseJsonBody<T>(res, text);
 }
 
@@ -98,13 +108,18 @@ export async function apiDelete(path: string): Promise<void> {
   const url = resolveApiPath(path);
   const res = await fetch(url, { method: "DELETE" });
   const text = await readBodyAsText(res);
-  if (!res.ok) throw new Error(await parseErrorMessage(res, text));
+  if (!res.ok) throw await requestError("DELETE", path, res, text);
 }
 
 export function getNestedId(obj: unknown, idField: string): number | undefined {
   if (!obj || typeof obj !== "object") return undefined;
   const v = (obj as Record<string, unknown>)[idField];
-  return typeof v === "number" ? v : undefined;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 
 function numOrUndef(v: unknown): number | undefined {

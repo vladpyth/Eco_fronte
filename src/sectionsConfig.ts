@@ -55,6 +55,10 @@ function S(v: unknown): string {
 /** ID из числа в строке или из вложенного объекта сущности */
 export function pickFk(val: unknown, nestedIdField: string): number {
   if (typeof val === "number" && Number.isFinite(val)) return val;
+  if (typeof val === "string" && val.trim() !== "") {
+    const n = Number(val);
+    if (Number.isFinite(n)) return n;
+  }
   return getNestedId(val, nestedIdField) ?? 0;
 }
 

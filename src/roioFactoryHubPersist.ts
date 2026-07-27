@@ -1,4 +1,5 @@
 import { apiDelete, apiGet, apiPost, apiPut, getNestedId } from "./api";
+import { toIsoDate } from "./DateField";
 import { pickFk } from "./rooSectionsConfig";
 import type { HubDropAir, HubFactoryBundle, HubMyTrash, HubPhone, HubTechnology } from "./roioFactoryHubOverlay";
 
@@ -23,11 +24,18 @@ function optStr(row: Record<string, unknown>, key: string): string | undefined {
 function optDate(row: Record<string, unknown>, key: string): string | undefined {
   const v = row[key];
   if (v === null || v === undefined || v === "") return undefined;
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  throw new Error(`Некорректная дата в поле «${key}» (нужен формат ГГГГ-ММ-ДД)`);
+  const iso = toIsoDate(v);
+  return iso || undefined;
+}
+
+/** Убирает "" из тела — иначе Jackson даёт «Некорректный формат данных» на числах/датах. */
+function sanitizeBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body)) {
+    if (v === undefined || v === "") continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 function optBool(row: Record<string, unknown>, key: string): boolean | undefined {
@@ -42,6 +50,10 @@ function fkId(val: unknown, ...idFields: string[]): number {
     if (id > 0) return id;
   }
   if (typeof val === "number" && val > 0) return val;
+  if (typeof val === "string" && val.trim() !== "") {
+    const n = Number(val);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   return 0;
 }
 
@@ -147,6 +159,15 @@ export function appendPonoinputFactoryFields(
     "note_services",
     "note_excluded",
   ] as const) {
+    if (key === "date_approve_tech" || key === "date_input_update") {
+      const iso = toIsoDate(row[key]);
+      if (iso) out[key] = iso;
+      else {
+        const v = optStr(row, key);
+        if (v) out[key] = v;
+      }
+      continue;
+    }
     const v = optStr(row, key);
     if (v) out[key] = v;
   }
@@ -168,39 +189,75 @@ async function ensureShortTechId(val: unknown): Promise<number | undefined> {
   if (!isTempId(id) && id !== 0) return undefined;
   const label = val && typeof val === "object" ? S((val as Record<string, unknown>).technology).trim() : "";
   if (!label) return undefined;
+  const list = await apiGet<Record<string, unknown>[]>("/api/short-discribe-technology").catch(() => []);
+  const found = (Array.isArray(list) ? list : []).find((r) => S(r.technology).trim() === label);
+  if (found) {
+    const existingId = getNestedId(found, "id_short_discribe_technology");
+    if (typeof existingId === "number" && existingId > 0) return existingId;
+  }
   const created = await apiPost<Record<string, unknown>>("/api/short-discribe-technology", { technology: label });
   const newId = getNestedId(created, "id_short_discribe_technology");
   return typeof newId === "number" && newId > 0 ? newId : undefined;
 }
 
-async function ensureClassDangerId(val: unknown): Promise<number> {
+async function ensureClassDangerId(val: unknown): Promise<number | null> {
+  // Пусто — допустимо: не создаём class_danger=0
+  if (val === null || val === undefined || val === "") return null;
+
   const id = fkId(val, "id_class_danger");
   if (id > 0) return id;
-  const raw =
-    val && typeof val === "object"
-      ? Number((val as Record<string, unknown>).class_danger ?? (val as Record<string, unknown>).classDanger)
-      : Number(val);
-  if (!Number.isFinite(raw)) throw new Error("Укажите класс опасности");
+
+  let raw: number | undefined;
+  if (typeof val === "object") {
+    const o = val as Record<string, unknown>;
+    const v = o.class_danger ?? o.classDanger;
+    if (v !== null && v !== undefined && String(v).trim() !== "") {
+      const n = Number(v);
+      if (Number.isFinite(n)) raw = n;
+    }
+  } else {
+    const n = Number(val);
+    if (Number.isFinite(n)) raw = n;
+  }
+  // Нераспознанное значение без id — считаем пустым, а не классом 0
+  if (raw === undefined) return null;
+
+  const list = await apiGet<Record<string, unknown>[]>("/api/class-danger").catch(() => []);
+  const found = (Array.isArray(list) ? list : []).find((r) => Number(r.class_danger ?? r.classDanger) === raw);
+  if (found) {
+    const existingId = getNestedId(found, "id_class_danger") ?? Number(found.id_class_danger);
+    if (typeof existingId === "number" && Number.isFinite(existingId) && existingId > 0) return existingId;
+  }
+
   const created = await apiPost<Record<string, unknown>>("/api/class-danger", { classDanger: raw });
   const newId = getNestedId(created, "id_class_danger");
   if (typeof newId !== "number" || newId <= 0) throw new Error("Не удалось создать класс опасности");
   return newId;
 }
 
-async function ensureMagazinTrashId(val: unknown, classDangerId?: number): Promise<number> {
+async function ensureMagazinTrashId(val: unknown, classDangerId?: number | null): Promise<number> {
   const id = fkId(val, "id_magazin_trash");
   if (id > 0) return id;
   const name = val && typeof val === "object" ? S((val as Record<string, unknown>).name_trash).trim() : "";
   if (!name) throw new Error("Укажите отход");
   const cd =
-    classDangerId ??
+    (classDangerId != null && classDangerId > 0 ? classDangerId : 0) ||
     (val && typeof val === "object" ? fkId((val as Record<string, unknown>).id_class_danger, "id_class_danger") : 0);
-  if (cd <= 0) throw new Error("Для нового отхода нужен класс опасности");
-  const created = await apiPost<Record<string, unknown>>("/api/magazin-trash", {
-    id_class_danger: cd,
-    code_trash: 10000000 + (Date.now() % 89999999),
+
+  const list = await apiGet<Record<string, unknown>[]>("/api/magazin-trash").catch(() => []);
+  const found = (Array.isArray(list) ? list : []).find((r) => S(r.name_trash).trim() === name);
+  if (found) {
+    const existingId = getNestedId(found, "id_magazin_trash") ?? Number(found.id_magazin_trash);
+    if (typeof existingId === "number" && existingId > 0) return existingId;
+  }
+
+  const body: Record<string, unknown> = {
+    code_trash: 10_000_000 + Math.floor(Math.random() * 89_999_999),
     name_trash: name,
-  });
+  };
+  if (cd > 0) body.id_class_danger = cd;
+
+  const created = await apiPost<Record<string, unknown>>("/api/magazin-trash", body);
   const newId = getNestedId(created, "id_magazin_trash");
   if (typeof newId !== "number" || newId <= 0) throw new Error("Не удалось создать отход");
   return newId;
@@ -211,6 +268,13 @@ async function ensurePhysStateId(val: unknown): Promise<number> {
   if (id > 0) return id;
   const name = val && typeof val === "object" ? S((val as Record<string, unknown>).name_group).trim() : "";
   if (!name) throw new Error("Укажите физическое состояние");
+  const list = await apiGet<Record<string, unknown>[]>("/api/phys-state-trash").catch(() => []);
+  const found = (Array.isArray(list) ? list : []).find((r) => S(r.name_group).trim() === name);
+  if (found) {
+    const existingId =
+      getNestedId(found, "id_mame_group") ?? Number(found.id_mame_group ?? found.id_phys_trash);
+    if (typeof existingId === "number" && existingId > 0) return existingId;
+  }
   const created = await apiPost<Record<string, unknown>>("/api/phys-state-trash", { name_group: name });
   const newId = getNestedId(created, "id_mame_group");
   if (typeof newId !== "number" || newId <= 0) throw new Error("Не удалось создать физ. состояние");
@@ -222,6 +286,12 @@ async function ensureNameDropAirId(val: unknown): Promise<number> {
   if (id > 0) return id;
   const name = val && typeof val === "object" ? S((val as Record<string, unknown>).name_drop_air_trash).trim() : "";
   if (!name) throw new Error("Укажите наименование выброса");
+  const list = await apiGet<Record<string, unknown>[]>("/api/name-drop-air-trash").catch(() => []);
+  const found = (Array.isArray(list) ? list : []).find((r) => S(r.name_drop_air_trash).trim() === name);
+  if (found) {
+    const existingId = getNestedId(found, "id_name_grope_air") ?? Number(found.id_name_grope_air);
+    if (typeof existingId === "number" && existingId > 0) return existingId;
+  }
   const created = await apiPost<Record<string, unknown>>("/api/name-drop-air-trash", {
     name_drop_air_trash: name,
   });
@@ -240,14 +310,10 @@ async function syncPhones(factoryId: number, phones: HubPhone[], baseline: HubBa
 
     if (typeof ph.id_phone_number === "number" && ph.id_phone_number > 0) {
       keep.add(ph.id_phone_number);
-      await apiPut(`/api/number-phone/${ph.id_phone_number}`, { number });
-      try {
-        await apiDelete(
-          `/api/number-phone-count/unlink?objectPlaceId=${factoryId}&phoneId=${ph.id_phone_number}`
-        );
-      } catch {
-        /* связи могло не быть */
-      }
+      await apiPut(`/api/number-phone/${ph.id_phone_number}`, {
+        number,
+        ur_ob: ph.ur_ob,
+      });
       await apiPost(
         `/api/number-phone-count?objectPlaceId=${factoryId}&phoneId=${ph.id_phone_number}&urOb=${ph.ur_ob}`,
         {}
@@ -276,26 +342,32 @@ async function syncPhones(factoryId: number, phones: HubPhone[], baseline: HubBa
 async function syncTechnologies(
   factoryId: number,
   rows: HubTechnology[],
-  baseline: HubBaselineIds
+  baseline: HubBaselineIds,
+  includePonoinputFields: boolean
 ): Promise<void> {
   const keep = new Set<number>();
   for (const row of rows) {
     if (row.id_class_danger == null && row.id_magazin_trash == null && row.id_phys_trash == null) continue;
-    if (row.id_class_danger == null || row.id_magazin_trash == null || row.id_phys_trash == null) {
-      throw new Error("В технологии заполните класс опасности, отход и физ. состояние");
+    // Класс опасности необязателен; отход и физ. состояние — да
+    if (row.id_magazin_trash == null || row.id_phys_trash == null) {
+      throw new Error("В технологии заполните отход и физ. состояние (класс опасности можно оставить пустым)");
     }
 
     const id_class_danger = await ensureClassDangerId(row.id_class_danger);
     const id_magazin_trash = await ensureMagazinTrashId(row.id_magazin_trash, id_class_danger);
     const id_phys_trash = await ensurePhysStateId(row.id_phys_trash);
-    const body: Record<string, unknown> = {
-      id_class_danger,
+    const body: Record<string, unknown> = sanitizeBody({
+      id_class_danger: id_class_danger ?? -1,
       id_magazin_trash,
       id_phys_trash,
       id_magasin_factory: factoryId,
-    };
-    if (row.get !== undefined && row.get !== null) body.get = Boolean(row.get);
-    if (row.spot != null && String(row.spot).trim()) body.spot = String(row.spot).trim();
+      ...(includePonoinputFields && row.get !== undefined && row.get !== null
+        ? { get: Boolean(row.get) }
+        : {}),
+      ...(includePonoinputFields && row.spot != null && String(row.spot).trim()
+        ? { spot: String(row.spot).trim() }
+        : {}),
+    });
 
     if (typeof row.id_technology === "number" && row.id_technology > 0) {
       keep.add(row.id_technology);
@@ -318,18 +390,21 @@ async function syncDropAirs(factoryId: number, rows: HubDropAir[], baseline: Hub
     const hasAny =
       row.id_class_danger != null || row.id_name_grope_air != null || Number(row.value_drop_trash) > 0;
     if (!hasAny) continue;
+    if (row.id_name_grope_air == null) {
+      throw new Error("В выбросе укажите наименование (класс опасности можно оставить пустым)");
+    }
 
     const id_class_danger = await ensureClassDangerId(row.id_class_danger);
     const id_name_grope_air = await ensureNameDropAirId(row.id_name_grope_air);
     const value_drop_trash = Number(row.value_drop_trash ?? 0);
     if (!(value_drop_trash > 0)) throw new Error("Значение выброса должно быть больше 0");
 
-    const body = {
-      id_class_danger,
+    const body = sanitizeBody({
+      id_class_danger: id_class_danger ?? -1,
       id_name_grope_air,
       id_magasin_factory: factoryId,
       value_drop_trash,
-    };
+    });
 
     if (typeof row.id_drop_air === "number" && row.id_drop_air > 0) {
       keep.add(row.id_drop_air);
@@ -346,26 +421,38 @@ async function syncDropAirs(factoryId: number, rows: HubDropAir[], baseline: Hub
   }
 }
 
-async function syncMyTrashes(factoryId: number, rows: HubMyTrash[], baseline: HubBaselineIds): Promise<void> {
+async function syncMyTrashes(
+  factoryId: number,
+  rows: HubMyTrash[],
+  baseline: HubBaselineIds,
+  includePonoinputFields: boolean
+): Promise<void> {
   const keep = new Set<number>();
   for (const row of rows) {
     const hasAny =
       row.id_class_danger != null || row.id_magazin_trash != null || Number(row.value_trash) > 0;
     if (!hasAny) continue;
+    if (row.id_magazin_trash == null) {
+      throw new Error("В отходе предприятия укажите отход (класс опасности можно оставить пустым)");
+    }
 
     const id_class_danger = await ensureClassDangerId(row.id_class_danger);
     const id_magazin_trash = await ensureMagazinTrashId(row.id_magazin_trash, id_class_danger);
     const value_trash = Number(row.value_trash ?? 0);
-    if (!(value_trash > 0)) throw new Error("Количество отхода должно быть больше 0");
+    if (!(value_trash >= 0) || Number.isNaN(value_trash)) throw new Error("Количество отхода некорректно");
 
-    const body: Record<string, unknown> = {
-      id_class_danger,
+    const body: Record<string, unknown> = sanitizeBody({
+      id_class_danger: id_class_danger ?? -1,
       id_magazin_trash,
       id_magasin_factory: factoryId,
       value_trash,
-    };
-    if (row.get !== undefined && row.get !== null) body.get = Boolean(row.get);
-    if (row.spot != null && String(row.spot).trim()) body.spot = String(row.spot).trim();
+      ...(includePonoinputFields && row.get !== undefined && row.get !== null
+        ? { get: Boolean(row.get) }
+        : {}),
+      ...(includePonoinputFields && row.spot != null && String(row.spot).trim()
+        ? { spot: String(row.spot).trim() }
+        : {}),
+    });
 
     if (typeof row.id_my_trash === "number" && row.id_my_trash > 0) {
       keep.add(row.id_my_trash);
@@ -401,9 +488,9 @@ export async function saveFactoryBundle(
     throw new Error("Выберите город из справочника (новый город через форму не создаётся)");
   }
 
-  let body = factoryToRequest(factory);
+  let body = sanitizeBody(factoryToRequest(factory));
   if (opts?.ponoinputExtras) {
-    body = appendPonoinputFactoryFields(body, factory);
+    body = sanitizeBody(appendPonoinputFactoryFields(body, factory));
   }
   let factoryId: number;
 
@@ -418,9 +505,9 @@ export async function saveFactoryBundle(
   }
 
   await syncPhones(factoryId, bundle.phones, baseline);
-  await syncTechnologies(factoryId, bundle.technologies, baseline);
+  await syncTechnologies(factoryId, bundle.technologies, baseline, Boolean(opts?.ponoinputExtras));
   await syncDropAirs(factoryId, bundle.dropAirs, baseline);
-  await syncMyTrashes(factoryId, bundle.myTrashes, baseline);
+  await syncMyTrashes(factoryId, bundle.myTrashes, baseline, Boolean(opts?.ponoinputExtras));
 
   return factoryId;
 }
