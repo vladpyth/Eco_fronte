@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiDelete, apiGet, apiPost, apiPut, getNestedId } from "./api";
 import { AutoResizeTextarea } from "./AutoResizeTextarea";
+import { DateField, toIsoDate } from "./DateField";
 import { ExcludeFilterControl, isExcludedRow } from "./ExcludeFilterControl";
 import { GridCardModal } from "./GridCardModal";
 import { IconCard, IconTrash } from "./tableActionIcons";
 import "./App.css";
+import "./RoioFactoryHub.css";
 
 const DEFAULT_COL_WIDTH = 148;
 const DEFAULT_PAGE_SIZE = 50;
@@ -220,7 +222,11 @@ function parseGridInput(raw: string, col: GridCol, row: Record<string, unknown>)
     return Number.isNaN(n) ? row[col.key] : n;
   }
   if (col.type === "bool") return raw === "Да" || raw === "true" || raw === "1";
-  if (col.type === "date") return raw.trim() === "" ? null : raw;
+  if (col.type === "date") {
+    const t = raw.trim();
+    if (t === "") return null;
+    return toIsoDate(t) || t;
+  }
   return raw;
 }
 
@@ -427,6 +433,16 @@ function GridValueCell(props: {
       </select>
     );
   }
+  if (col.type === "date") {
+    return td(
+      <DateField
+        key={`${str(row[idField])}-${col.key}-${str(row[col.key])}`}
+        value={row[col.key]}
+        inputClassName="cell-input-minimal date-field-text"
+        onChange={(iso) => onCommit({ ...row, [col.key]: iso || null })}
+      />
+    );
+  }
   const defVal = gridInputDefault(row, col, cellValue);
   const commitBlur = (raw: string) => onCommit({ ...row, [col.key]: parseGridInput(raw, col, row) });
   if (singleCol || col.multiline) {
@@ -440,7 +456,7 @@ function GridValueCell(props: {
       />
     );
   }
-  const inputType = col.type === "number" ? "number" : col.type === "date" ? "date" : "text";
+  const inputType = col.type === "number" ? "number" : "text";
   return td(
     <input key={`${str(row[idField])}-${col.key}-${defVal}`} className="cell-input-minimal" defaultValue={defVal} type={inputType}
       onBlur={(e) => commitBlur(e.target.value)} />

@@ -1,4 +1,5 @@
 import { AutoResizeTextarea } from "./AutoResizeTextarea";
+import { DateField } from "./DateField";
 
 export type GridCardCol = {
   key: string;
@@ -111,7 +112,22 @@ export function GridCardModal(props: GridCardModalProps) {
               );
             }
 
-            if (col.type === "number" || col.type === "float" || col.type === "date") {
+            if (col.type === "date") {
+              return (
+                <div key={col.key} className="object-card-field">
+                  <label className="object-card-label">{col.label}</label>
+                  <div className="object-card-value">
+                    <DateField
+                      value={draft[col.key] ?? v}
+                      inputClassName="cell-input-minimal date-field-text"
+                      onChange={(iso) => onDraftChange(col.key, iso, "date")}
+                    />
+                  </div>
+                </div>
+              );
+            }
+
+            if (col.type === "number" || col.type === "float") {
               return (
                 <div key={col.key} className="object-card-field">
                   <label className="object-card-label">{col.label}</label>
@@ -120,7 +136,7 @@ export function GridCardModal(props: GridCardModalProps) {
                       className="cell-input-minimal"
                       style={{ width: "100%" }}
                       value={v}
-                      type={col.type === "date" ? "date" : "number"}
+                      type="number"
                       step={col.type === "float" ? "any" : undefined}
                       onChange={(e) =>
                         onDraftChange(col.key, e.target.value, col.type)
@@ -131,7 +147,7 @@ export function GridCardModal(props: GridCardModalProps) {
               );
             }
 
-            const useMultiline = col.multiline !== false && col.type !== "number" && col.type !== "float";
+            const useMultiline = col.multiline !== false;
 
             return (
               <div key={col.key} className="object-card-field">

@@ -36,7 +36,9 @@ import {
   type RefKind,
 } from "./objectPlaceColumns";
 import { GridCardModal } from "./GridCardModal";
+import { DateField, toIsoDate } from "./DateField";
 import { RhzoObjectHub } from "./RhzoObjectHub";
+import "./RoioFactoryHub.css";
 
 const COL_WIDTHS_LS = "eco-service-col-widths";
 const DEFAULT_COL_WIDTH = 148;
@@ -516,7 +518,9 @@ function buildObjectFieldPatch(
   } else if (type === "bool") {
     patch[key] = raw === "Да" || raw === "true" || raw === "1";
   } else if (type === "date") {
-    patch[key] = raw.trim() === "" ? null : raw;
+    const t = raw.trim();
+    if (t === "") patch[key] = null;
+    else patch[key] = toIsoDate(t) || t;
   } else {
     patch[key] = raw;
   }
@@ -588,7 +592,9 @@ function parseGridInput(
     return raw === "Да" || raw === "true" || raw === "1";
   }
   if (col.type === "date") {
-    return raw.trim() === "" ? null : raw;
+    const t = raw.trim();
+    if (t === "") return null;
+    return toIsoDate(t) || t;
   }
   return raw;
 }
@@ -1546,6 +1552,24 @@ function ObjectCardModal(props: {
                 </div>
               );
             }
+            if (col.type === "date") {
+              return (
+                <div key={col.key} className="object-card-field">
+                  <label className="object-card-label">{col.label}</label>
+                  <div className="object-card-value">
+                    <DateField
+                      key={`${rowId}-${col.key}`}
+                      disabled={!editable}
+                      value={props.row[col.key] ?? v}
+                      inputClassName="cell-input-minimal date-field-text"
+                      onChange={(iso) =>
+                        editable && props.onFieldChange(col.key, iso, "date")
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={col.key} className="object-card-field">
                 <label className="object-card-label">{col.label}</label>
@@ -1555,13 +1579,7 @@ function ObjectCardModal(props: {
                     className="cell-input-minimal"
                     style={{ width: "100%", ...(editable ? {} : { background: "#f4f4f5" }) }}
                     value={v}
-                    type={
-                      col.type === "number"
-                        ? "number"
-                        : col.type === "date"
-                          ? "date"
-                          : "text"
-                    }
+                    type={col.type === "number" ? "number" : "text"}
                     readOnly={!editable}
                     onChange={(e) =>
                       editable &&
@@ -3401,6 +3419,35 @@ export function RhzoApp() {
                                 </td>
                               );
                             }
+                            if (col.type === "date") {
+                              return (
+                                <td
+                                  key={col.key}
+                                  className={autoFill ? "cell-auto-filled" : undefined}
+                                  style={{ width: gcw, minWidth: 64 }}
+                                >
+                                  <DateField
+                                    key={`${str(row[idf])}-${col.key}-${str(row[col.key])}`}
+                                    value={row[col.key]}
+                                    inputClassName="cell-input-minimal date-field-text"
+                                    onChange={(iso) => {
+                                      if (
+                                        sid === "magazin-trash" &&
+                                        typeof rid === "number" &&
+                                        rid > 0
+                                      ) {
+                                        clearMagazinAutoCell(rid, col.key);
+                                      }
+                                      const next = {
+                                        ...row,
+                                        [col.key]: iso || null,
+                                      };
+                                      void saveGridRow(next, idx, sid);
+                                    }}
+                                  />
+                                </td>
+                              );
+                            }
                             if (
                               gridColumns.length === 1 &&
                               !col.gridRef &&
@@ -3446,9 +3493,7 @@ export function RhzoApp() {
                                       ? "number"
                                       : col.type === "float"
                                         ? "text"
-                                        : col.type === "date"
-                                          ? "date"
-                                          : "text"
+                                        : "text"
                                   }
                                   onBlur={(e) => {
                                     if (

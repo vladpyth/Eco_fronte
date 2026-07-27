@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { apiDelete, apiGet, apiPost, apiPut, formatCity, formatDegree, formatGroupPlace, formatRegion, formatStorage, getNestedId, objectPlaceTrashToRequest } from "./api";
+import { DateField, formatDateRu } from "./DateField";
 import { ExcludeFilterControl } from "./ExcludeFilterControl";
 import "./RoioFactoryHub.css";
 
@@ -126,46 +127,7 @@ function str(v: unknown): string {
 }
 
 function fmtDate(v: unknown): string {
-  const iso = toInputDate(v);
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-");
-  if (!y || !m || !d) return str(v);
-  return `${d}.${m}.${y}`;
-}
-
-function toInputDate(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "";
-  if (Array.isArray(v) && v.length >= 3) {
-    const y = Number(v[0]);
-    const m = Number(v[1]);
-    const d = Number(v[2]);
-    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return "";
-    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-  }
-  const s = str(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  return "";
-}
-
-function HubDateInput(props: { value: unknown; disabled?: boolean; onChange: (iso: string) => void }) {
-  const iso = toInputDate(props.value);
-  return (
-    <div className="hub-date-field">
-      <input
-        className="hub-input hub-date-input"
-        type="date"
-        lang="ru"
-        disabled={props.disabled}
-        value={iso}
-        onChange={(e) => props.onChange(e.target.value)}
-      />
-      <span className={`hub-date-display${iso ? "" : " hub-date-display--empty"}`} aria-hidden>
-        {iso ? fmtDate(iso) : "ДД.ММ.ГГГГ"}
-      </span>
-    </div>
-  );
+  return formatDateRu(v) || (v === null || v === undefined || v === "" ? "" : String(v));
 }
 
 function HubCombo(props: {
@@ -1083,7 +1045,7 @@ export function RhzoObjectHub() {
                       <div key={f.key} className={`hub-field${f.row ? ` hub-row-${f.row}` : ""}`}>
                         {label}
                         {f.type === "date" ? (
-                          <HubDateInput
+                          <DateField
                             disabled={readOnly}
                             value={val}
                             onChange={(iso) => updateObjectField(f.key, iso)}

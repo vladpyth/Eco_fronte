@@ -168,6 +168,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   background: #fff;
 }
 
@@ -406,18 +407,24 @@
   background: #f4f4f5;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .hub-form-shell {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   height: 100%;
+  max-height: 100%;
   max-width: 1100px;
   width: 100%;
   margin: 0 auto;
   background: #ffffff;
   box-shadow: 0 2px 16px rgba(24, 24, 27, 0.06);
   border-radius: 0;
+  overflow: hidden;
 }
 
 .hub-form-header {
@@ -460,8 +467,12 @@
 }
 
 .hub-form-body {
-  flex: 1;
-  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 20px 24px 28px;
   display: flex;
   flex-direction: column;
@@ -582,6 +593,59 @@
 
 .hub-date-display--empty {
   color: #a1a1aa;
+}
+
+/* Дата: ввод цифрами + календарь */
+.date-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.date-field-text {
+  width: 100%;
+  padding-right: 40px !important;
+}
+
+.date-field-calendar {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #52525b;
+  cursor: pointer;
+}
+
+.date-field-calendar:hover:not(:disabled) {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.date-field-calendar:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.date-field-native {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
 }
 
 .hub-input {
@@ -797,6 +861,16 @@
 }
 
 @media (max-width: 800px) {
+  .hub-form-header,
+  .hub-form-footer {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .hub-form-body {
+    padding: 12px 12px 24px;
+  }
+
   .hub-form-grid {
     grid-template-columns: 1fr;
   }
@@ -805,5 +879,10 @@
   .hub-field.hub-row-approve,
   .hub-field.hub-row-flags {
     grid-column: span 1;
+  }
+
+  .hub-nested-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }

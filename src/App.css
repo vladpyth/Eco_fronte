@@ -785,8 +785,13 @@ body {
 }
 
 .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 16px 20px;
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: #fff;
 }
 
@@ -1048,6 +1053,16 @@ body {
 }
 
 @media (max-width: 800px) {
+  #root {
+    padding: 0;
+  }
+
+  .app-shell {
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+
   .app-container {
     flex-direction: column;
   }
@@ -1056,5 +1071,46 @@ body {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid #d4d4d8;
+    max-height: 38vh;
+    flex-shrink: 0;
+  }
+
+  .main-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table-wrapper,
+  .hub-table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+
+  .modal-content,
+  .object-card-modal {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: 100%;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .object-card-field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .object-card-label {
+    padding-top: 0;
   }
 }
