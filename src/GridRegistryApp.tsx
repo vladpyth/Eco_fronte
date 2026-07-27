@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiDelete, apiGet, apiPost, apiPut, getNestedId } from "./api";
 import { AutoResizeTextarea } from "./AutoResizeTextarea";
+import { ExcludeFilterControl, isExcludedRow } from "./ExcludeFilterControl";
 import { GridCardModal } from "./GridCardModal";
+import { IconCard, IconTrash } from "./tableActionIcons";
 import "./App.css";
 
 const DEFAULT_COL_WIDTH = 148;
@@ -289,27 +291,47 @@ function GridReferenceModal(props: {
       <div className="modal-content" role="dialog" aria-modal onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <span>{spec.modalTitle}</span>
-          <button type="button" className="clear-filters" style={{ background: "none", fontSize: "24px", padding: "0 8px" }} onClick={props.onClose} aria-label="Закрыть">×</button>
+          <button type="button" className="modal-header-close" onClick={props.onClose} aria-label="Закрыть">
+            ×
+          </button>
         </div>
         <div className="modal-body">
           {props.allowClear && props.onClear ? (
-            <div style={{ marginBottom: 12 }}>
-              <button type="button" className="btn-small" onClick={() => props.onClear?.()}>Сбросить связь</button>
+            <div className="modal-toolbar">
+              <span />
+              <button type="button" className="modal-toolbar-link" onClick={() => props.onClear?.()}>
+                Сбросить связь
+              </button>
             </div>
           ) : null}
-          <div style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <input className="cell-input-minimal" style={{ flex: 1, minWidth: 160 }} placeholder={spec.placeholder} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void add()} />
-            <button type="button" className="btn-small" onClick={() => void add()}>Добавить и выбрать</button>
+          <div className="modal-toolbar">
+            <input
+              className="cell-input-minimal"
+              style={{ flex: 1, minWidth: 160 }}
+              placeholder={spec.placeholder}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void add()}
+            />
+            <button type="button" className="modal-toolbar-link" onClick={() => void add()}>
+              Добавить и выбрать
+            </button>
           </div>
           <div style={{ maxHeight: 400, overflowY: "auto" }}>
             <table className="modal-table">
-              <thead><tr><th>{spec.primaryHeader}</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>{spec.primaryHeader}</th>
+                </tr>
+              </thead>
               <tbody>
                 {props.rows.length === 0 ? (
-                  <tr><td style={{ color: "#71717a" }}>Нет данных</td></tr>
+                  <tr>
+                    <td style={{ color: "#71717a" }}>Нет данных</td>
+                  </tr>
                 ) : (
                   props.rows.map((item) => (
-                    <tr key={str(item[idKey])} style={{ cursor: "pointer" }} onClick={() => props.onPick(item)}>
+                    <tr key={str(item[idKey])} onClick={() => props.onPick(item)}>
                       <td>{spec.display(item)}</td>
                     </tr>
                   ))
@@ -466,6 +488,7 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
   const [debouncedQ, setDebouncedQ] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
+  const [showExcluded, setShowExcluded] = useState(false);
   const [colWidths, setColWidths] = useState(() => loadColWidths(colWidthsStorageKey));
   const [gridRefLists, setGridRefLists] = useState<Record<string, Record<string, unknown>[]>>({});
   const gridRefListsRef = useRef(gridRefLists);
@@ -545,6 +568,8 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     setError(null);
     try {
       let loaded: Record<string, unknown>[] = [];
+      const supportsExcludeParam =
+        def.apiPath.includes("magasin-factory") || def.apiPath.includes("object-place-trash");
       if (serverPagination) {
         const params = new URLSearchParams({
           page: String(Math.max(0, page - 1)),
@@ -555,12 +580,14 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
           params.set("sort", ui.sortColumn);
           params.set("dir", ui.sortDirection);
         }
+        if (supportsExcludeParam && showExcluded) params.set("includeExcluded", "true");
         const data = await apiGet<PagePayload<Record<string, unknown>>>(`${def.apiPath}?${params}`);
         loaded = Array.isArray(data.content) ? data.content : [];
         setTotalElements(typeof data.totalElements === "number" ? data.totalElements : loaded.length);
       } else {
         const data = await apiGet<Record<string, unknown>[]>(def.apiPath);
         loaded = Array.isArray(data) ? data : [];
+        if (!showExcluded) loaded = loaded.filter((r) => !isExcludedRow(r));
         setTotalElements(loaded.length);
       }
       if (enrichLoadedRows) {
@@ -574,7 +601,7 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [getSection, enrichLoadedRows, serverPagination, page, pageSize, debouncedQ, ui.sortColumn, ui.sortDirection]);
+  }, [getSection, enrichLoadedRows, serverPagination, page, pageSize, debouncedQ, ui.sortColumn, ui.sortDirection, showExcluded]);
 
   useEffect(() => {
     if (!serverPagination) return;
@@ -593,8 +620,9 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     setGridCard(null);
     setPage(1);
     setDebouncedQ("");
+    setShowExcluded(false);
   }, [section]);
-  useEffect(() => { setPage(1); }, [ui.searchQuery, ui.sortColumn, ui.sortDirection, pageSize]);
+  useEffect(() => { setPage(1); }, [ui.searchQuery, ui.sortColumn, ui.sortDirection, pageSize, showExcluded]);
 
   useEffect(() => {
     if (!enrichLoadedRows) return;
@@ -635,6 +663,7 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
 
   const clearFilters = () => {
     setUi({ searchQuery: "", sortColumn: null, sortDirection: "asc" });
+    setShowExcluded(false);
     setPage(1);
   };
   const switchSection = (s: string) => {
@@ -947,34 +976,48 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
           leadingSections.find((s) => s.id === section)?.render() ?? null
         ) : (
           <>
-        <h1 className="page-title">{sectionDef.title}</h1>
+        <div className="page-header-row">
+          <h1 className="page-title">{sectionDef.title}</h1>
+          <button type="button" className="page-add-btn" onClick={triggerAddRow}>
+            + Создать
+          </button>
+        </div>
         {error && <div className="error-banner">{error}</div>}
         <div className="toolbar">
           <div className="search-box">
             <input type="search" placeholder="Поиск по всем полям таблицы..." value={ui.searchQuery}
               onChange={(e) => setUi((p) => ({ ...p, searchQuery: e.target.value }))} />
+            <ExcludeFilterControl showExcluded={showExcluded} onChange={setShowExcluded} />
           </div>
           <button type="button" className="clear-filters" onClick={clearFilters}>Сбросить поиск и сортировку</button>
         </div>
 
         {loading ? <div className="loading">Загрузка...</div> : (
           <>
+            <div className="data-table-panel">
             <div className="data-table-wrapper">
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th className="col-actions" aria-label="Действия">
+                      Действия
+                    </th>
                     {gridColumns.map((col) => {
                       const ind = ui.sortColumn === col.key ? (ui.sortDirection === "asc" ? "▲" : "▼") : "⇅";
                       const w = getColWidth(col.key);
                       return (
-                        <th key={col.key} style={{ width: w, minWidth: 64 }} onClick={() => sortHeaderClick(col.key)}>
+                        <th
+                          key={col.key}
+                          style={{ width: w, minWidth: 64 }}
+                          className={ui.sortColumn === col.key ? "th-sorted" : undefined}
+                          onClick={() => sortHeaderClick(col.key)}
+                        >
                           <span className="th-label">{col.label} <span className="sort-icon">{ind}</span></span>
                           <span className="col-resize-handle" role="separator" aria-hidden title="Потяните, чтобы изменить ширину столбца"
                             onClick={(e) => e.stopPropagation()} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); beginColumnResize(col.key, e.clientX); }} />
                         </th>
                       );
                     })}
-                    <th className="col-actions" aria-label="Действия" />
                   </tr>
                 </thead>
                 <tbody>
@@ -982,6 +1025,28 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                     const idx = resolveGridRowIndex(row);
                     return (
                       <tr key={`grid-${section}-${rowIndex}-${str(row[idField])}`}>
+                        <td className="col-actions">
+                          {hasCardForm(section) ? (
+                            <button
+                              type="button"
+                              className="table-icon-btn table-icon-card"
+                              title="Карточка"
+                              aria-label="Карточка"
+                              onClick={() => openGridEditCard(row, idx)}
+                            >
+                              <IconCard />
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="table-icon-btn table-icon-danger"
+                            title="Удалить"
+                            aria-label="Удалить"
+                            onClick={() => void deleteRow(row)}
+                          >
+                            <IconTrash />
+                          </button>
+                        </td>
                         {gridColumns.map((col) => {
                           const gcw = getColWidth(col.key);
                           if (col.gridRef) {
@@ -1007,20 +1072,6 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                               cellValue={cellValue} onCommit={(next) => void saveGridRow(next, idx)} />
                           );
                         })}
-                        <td className="col-actions">
-                          {hasCardForm(section) ? (
-                            <button
-                              type="button"
-                              className="btn-small"
-                              onClick={() => openGridEditCard(row, idx)}
-                            >
-                              Карточка
-                            </button>
-                          ) : null}
-                          <button type="button" className="btn-small" onClick={() => void deleteRow(row)}>
-                            Удалить
-                          </button>
-                        </td>
                       </tr>
                     );
                   })}
@@ -1030,22 +1081,17 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                 </tbody>
               </table>
             </div>
-            <div className="info-note" style={FLEX_ROW}>
-              <span>
+            <div className="table-pager">
+              <span className="table-pager-info">
                 {paginationEnabled
-                  ? serverPagination
-                    ? `Показано ${displayRows.length} на стр. ${safePage} из ${totalPages} · всего ${totalElements}`
-                    : `Показано ${displayRows.length} на стр. ${safePage} из ${totalPages} · всего ${filteredRows.length} (загружено ${rows.length})`
-                  : `Показано ${displayRows.length} из ${rows.length} записей. Горизонтальная прокрутка — для широких таблиц.`}
+                  ? `Стр. ${safePage} из ${totalPages} · всего ${Math.max(0, serverPagination ? totalElements : filteredRows.length)}`
+                  : `Всего ${Math.max(0, rows.length)}`}
               </span>
               {paginationEnabled ? (
-                <div className="pagination" role="navigation" aria-label="Страницы таблицы">
-                  <label className="pagination-size">
+                <>
+                  <label className="table-pager-size">
                     На странице
-                    <select
-                      value={pageSize}
-                      onChange={(e) => setPageSize(Number(e.target.value))}
-                    >
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
                       {pageSizeOptions.map((n) => (
                         <option key={n} value={n}>
                           {n}
@@ -1053,78 +1099,41 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
                       ))}
                     </select>
                   </label>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    disabled={safePage <= 1}
-                    onClick={() => setPage(1)}
-                  >
-                    «
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    disabled={safePage <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  >
-                    ‹
-                  </button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter((p) => {
-                      if (totalPages <= 7) return true;
-                      if (p === 1 || p === totalPages) return true;
-                      return Math.abs(p - safePage) <= 1;
-                    })
-                    .reduce<(number | "…")[]>((acc, p, idx, arr) => {
-                      if (idx > 0) {
-                        const prev = arr[idx - 1];
-                        if (typeof prev === "number" && p - prev > 1) acc.push("…");
-                      }
-                      acc.push(p);
-                      return acc;
-                    }, [])
-                    .map((p, i) =>
-                      p === "…" ? (
-                        <span key={`e${i}`} className="pagination-ellipsis">
-                          …
-                        </span>
-                      ) : (
-                        <button
-                          key={p}
-                          type="button"
-                          className={`btn-small${p === safePage ? " pagination-current" : ""}`}
-                          onClick={() => setPage(p)}
-                        >
-                          {p}
-                        </button>
-                      )
-                    )}
-                  <button
-                    type="button"
-                    className="btn-small"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  >
-                    ›
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-small"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setPage(totalPages)}
-                  >
-                    »
-                  </button>
-                </div>
+                  <div className="table-pager-nav" role="navigation" aria-label="Страницы таблицы">
+                    <button type="button" className="table-page-btn" disabled={safePage <= 1} onClick={() => setPage(1)}>
+                      «
+                    </button>
+                    <button
+                      type="button"
+                      className="table-page-btn"
+                      disabled={safePage <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      className="table-page-btn"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      ›
+                    </button>
+                    <button
+                      type="button"
+                      className="table-page-btn"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setPage(totalPages)}
+                    >
+                      »
+                    </button>
+                  </div>
+                </>
               ) : null}
+            </div>
             </div>
           </>
         )}
-        {!isLeadingSection ? (
-          <button type="button" className="floating-add-btn" onClick={triggerAddRow}>
-            {hasCardForm(section) ? "Добавить" : "Добавить строку"}
-          </button>
-        ) : null}
           </>
         )}
       </main>

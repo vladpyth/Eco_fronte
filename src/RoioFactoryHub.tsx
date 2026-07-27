@@ -16,6 +16,8 @@ import {
   saveFactoryBundle,
   type HubBaselineIds,
 } from "./roioFactoryHubPersist";
+import { ExcludeFilterControl } from "./ExcludeFilterControl";
+import { resolveApiPath } from "./apiModule";
 import "./RoioFactoryHub.css";
 
 type Mode = "view" | "edit" | "create";
@@ -469,6 +471,7 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [showExcluded, setShowExcluded] = useState(false);
 
   const [form, setForm] = useState<{
     mode: Mode;
@@ -504,7 +507,7 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQ, sortColumn, sortDir, pageSize]);
+  }, [debouncedQ, sortColumn, sortDir, pageSize, showExcluded]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -519,6 +522,7 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
         params.set("sort", sortColumn);
         params.set("dir", sortDir);
       }
+      if (showExcluded) params.set("includeExcluded", "true");
       const data = await apiGet<PagePayload<Record<string, unknown>>>(`/api/magasin-factory?${params}`);
       const content = Array.isArray(data.content) ? data.content : [];
       setRows(content);
@@ -530,7 +534,7 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedQ, sortColumn, sortDir]);
+  }, [page, pageSize, debouncedQ, sortColumn, sortDir, showExcluded]);
 
   useEffect(() => {
     void loadList();
@@ -696,19 +700,32 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
 
       <div className="hub-list-toolbar">
         <h1 className="hub-title">Паспорт предприятия</h1>
-        <button type="button" className="hub-btn-add hub-btn-create" onClick={openCreate}>
-          + Создать
-        </button>
+        <div className="hub-list-toolbar-actions">
+          <a
+            className="hub-btn-add hub-btn-export"
+            href={resolveApiPath("/api/reports/pdf")}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Экспорт отчёта PDF
+          </a>
+          <button type="button" className="hub-btn-add hub-btn-create" onClick={openCreate}>
+            + Создать
+          </button>
+        </div>
       </div>
 
       <div className="hub-toolbar">
-        <input
-          type="search"
-          className="hub-search"
-          placeholder="Поиск по полям списка…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="hub-search-wrap">
+          <input
+            type="search"
+            className="hub-search"
+            placeholder="Поиск по полям списка…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <ExcludeFilterControl showExcluded={showExcluded} onChange={setShowExcluded} />
+        </div>
         <button
           type="button"
           className="hub-link-btn"
@@ -716,6 +733,7 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
             setSearch("");
             setSortColumn("id_registration");
             setSortDir("asc");
+            setShowExcluded(false);
           }}
         >
           Сбросить

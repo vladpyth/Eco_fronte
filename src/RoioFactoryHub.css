@@ -17,6 +17,13 @@
   flex-shrink: 0;
 }
 
+.hub-list-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .hub-title {
   margin: 0;
   font-size: 22px;
@@ -60,6 +67,20 @@
   flex-shrink: 0;
 }
 
+.hub-btn-export {
+  color: #a16207;
+  border-color: #ca8a04;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.hub-btn-export:hover {
+  background: #fefce8;
+  border-color: #a16207;
+  color: #854d0e;
+}
+
 .hub-btn-solid {
   background: #16a34a;
   color: #fff;
@@ -98,14 +119,28 @@
   flex-shrink: 0;
 }
 
+.hub-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  max-width: 460px;
+  min-width: 0;
+}
+
 .hub-search {
   flex: 1;
   max-width: 420px;
+  min-width: 0;
   padding: 9px 12px;
   border: 1px solid #d4d4d8;
   border-radius: 8px;
   font-size: 14px;
   background: #fff;
+}
+
+.hub-search-wrap .hub-search {
+  max-width: none;
 }
 
 .hub-link-btn {

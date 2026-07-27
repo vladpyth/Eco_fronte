@@ -150,15 +150,15 @@ export function gridCellValue(
 }
 
 export const OBJECT_SECTION = {
-  title: "Объекты размещения отходов (ObjectPlaceTrash)",
-  sidebar: "Объекты",
+  title: "Паспорт объекта (ObjectPlaceTrash)",
+  sidebar: "Паспорт объекта",
 } as const;
 
 export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
   "around-build": {
     apiPath: "/api/around-build",
     idField: "id_around_build",
-    title: "Здания вокруг объекта (AroundBuild)",
+    title: "Окружающие здания (AroundBuild)",
     sidebar: "Окр. здания",
     columns: [{ key: "name", label: "Название", type: "text" }],
     toRequest: (row) => ({ name: S(row.name) }),
@@ -167,7 +167,7 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
   "natual-save-building": {
     apiPath: "/api/natual-save-building",
     idField: "id_natual_save_build",
-    title: "Здания природоохранного назначения (NatualSaveBuilding)",
+    title: "Природоохранные здания (NatualSaveBuilding)",
     sidebar: "Природоохр. здания",
     columns: [{ key: "name", label: "Название", type: "text" }],
     toRequest: (row) => ({ name: S(row.name) }),
@@ -321,11 +321,11 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       { key: "name_trash", label: "Наименование отхода", type: "text" },
       { key: "id_class_danger", label: "Класс опасности", gridRef: "classDanger" },
       { key: "id_type_trash", label: "Тип отхода", gridRef: "typeTrash1" },
-      { key: "id_level_trash", label: "Блок", gridRef: "levelTrash" },
-      { key: "id_mame_group", label: "Группа наименований", gridRef: "nameGroup" },
-      { key: "block1", label: "Раздел", type: "number" },
-      { key: "group2", label: "Группа 2", type: "number" },
-      { key: "group3", label: "Группа 3", type: "number" },
+      { key: "id_level_trash", label: "Группа наименований", gridRef: "levelTrash" },
+      { key: "id_mame_group", label: "Состав", gridRef: "nameGroup" },
+      { key: "block1", label: "Блок", type: "number" },
+      { key: "group2", label: "Раздел", type: "number" },
+      { key: "group3", label: "Группа", type: "number" },
     ],
     toRequest: (row) => magazinTrashApiBody(row),
     createDefault: async () => {

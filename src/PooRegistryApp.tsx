@@ -1,6 +1,6 @@
 import { useCallback, type ReactNode } from "react";
 import { apiGet } from "./api";
-import { resolveApiPath, setApiModule, type ApiModule } from "./apiModule";
+import { setApiModule, type ApiModule } from "./apiModule";
 import { GridRegistryApp } from "./GridRegistryApp";
 import { handleRooGridRefAction } from "./rooGridRefActions";
 import {
@@ -94,9 +94,6 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
       cardSectionIds={cardSectionIds}
       pagination={props.pagination}
       leadingSections={props.leadingSections}
-      sidebarReportLinks={[
-        { href: resolveApiPath("/api/reports/pdf"), label: "Экспорт отчёта PDF" },
-      ]}
     />
   );
 }

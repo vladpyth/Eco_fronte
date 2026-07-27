@@ -26,6 +26,8 @@ import {
   pickFk,
 } from "./sectionsConfig";
 import { GRID_REF_SPECS } from "./gridRefConfig";
+import { ExcludeFilterControl, isExcludedRow } from "./ExcludeFilterControl";
+import { IconCard, IconTrash } from "./tableActionIcons";
 import {
   OBJECT_COLUMNS,
   OBJECT_TABLE_COLUMNS,
@@ -33,6 +35,7 @@ import {
   type RefKind,
 } from "./objectPlaceColumns";
 import { GridCardModal } from "./GridCardModal";
+import { RhzoObjectHub } from "./RhzoObjectHub";
 
 const COL_WIDTHS_LS = "eco-service-col-widths";
 const DEFAULT_COL_WIDTH = 148;
@@ -76,6 +79,14 @@ type UiState = {
   sortColumn: string | null;
   sortDirection: "asc" | "desc";
 };
+
+type PagePayload<T> = {
+  content: T[];
+  totalElements: number;
+  totalPages?: number;
+};
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 const REF_CONFIG: Record<
   RefKind,
@@ -518,51 +529,6 @@ function buildObjectFieldPatch(
   return patch;
 }
 
-function filterAndSortData(
-  rows: Record<string, unknown>[],
-  columns: string[],
-  ui: UiState,
-  cellValue: (row: Record<string, unknown>, col: string) => string,
-  /** Без явной сортировки по столбцу — новые строки (больший id) сверху. */
-  primaryIdField: string
-): Record<string, unknown>[] {
-  let filtered = [...rows];
-  if (ui.searchQuery.trim()) {
-    const q = ui.searchQuery.toLowerCase();
-    filtered = filtered.filter((row) =>
-      columns.some((col) => cellValue(row, col).toLowerCase().includes(q))
-    );
-  }
-  if (ui.sortColumn) {
-    const col = ui.sortColumn;
-    filtered.sort((a, b) => {
-      const av = cellValue(a, col);
-      const bv = cellValue(b, col);
-      const an = parseFloat(av);
-      const bn = parseFloat(bv);
-      const isNum = !Number.isNaN(an) && !Number.isNaN(bn) && av !== "" && bv !== "";
-      let cmp: number;
-      if (isNum) cmp = an - bn;
-      else cmp = av.toLowerCase().localeCompare(bv.toLowerCase());
-      return ui.sortDirection === "asc" ? cmp : -cmp;
-    });
-  } else {
-    filtered.sort((a, b) => {
-      const av = a[primaryIdField];
-      const bv = b[primaryIdField];
-      const an = typeof av === "number" ? av : Number(av);
-      const bn = typeof bv === "number" ? bv : Number(bv);
-      const aOk = Number.isFinite(an);
-      const bOk = Number.isFinite(bn);
-      if (aOk && bOk) return bn - an;
-      if (aOk && !bOk) return -1;
-      if (!aOk && bOk) return 1;
-      return 0;
-    });
-  }
-  return filtered;
-}
-
 const GRID_CARD_SECTIONS = new Set<GridSectionId>([
   "magazin-trash",
   "characteristic-trash",
@@ -793,8 +759,7 @@ function PhoneModal(props: {
           <span>{props.phoneKind === "legal" ? "Телефон юр. лица" : "Телефон собственника"}</span>
           <button
             type="button"
-            className="clear-filters"
-            style={{ background: "none", fontSize: "24px", padding: "0 8px" }}
+            className="modal-header-close"
             onClick={props.onClose}
             aria-label="Закрыть"
           >
@@ -941,8 +906,7 @@ function RelationModal(props: {
           <span>{props.title}</span>
           <button
             type="button"
-            className="clear-filters"
-            style={{ background: "none", fontSize: "24px", padding: "0 8px" }}
+            className="modal-header-close"
             onClick={props.onClose}
             aria-label="Закрыть"
           >
@@ -1113,8 +1077,7 @@ function GridReferenceModal(props: {
           <span>{spec.modalTitle}</span>
           <button
             type="button"
-            className="clear-filters"
-            style={{ background: "none", fontSize: "24px", padding: "0 8px" }}
+            className="modal-header-close"
             onClick={props.onClose}
             aria-label="Закрыть"
           >
@@ -1123,13 +1086,14 @@ function GridReferenceModal(props: {
         </div>
         <div className="modal-body">
           {props.allowClear && props.onClear ? (
-            <div style={{ marginBottom: 12 }}>
-              <button type="button" className="btn-small" onClick={() => props.onClear?.()}>
+            <div className="modal-toolbar">
+              <span />
+              <button type="button" className="modal-toolbar-link" onClick={() => props.onClear?.()}>
                 Сбросить связь
               </button>
             </div>
           ) : null}
-          <div style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <div className="modal-toolbar">
             <input
               className="cell-input-minimal"
               style={{ flex: 1, minWidth: 160 }}
@@ -1138,7 +1102,7 @@ function GridReferenceModal(props: {
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void add()}
             />
-            <button type="button" className="btn-small" onClick={() => void add()}>
+            <button type="button" className="modal-toolbar-link" onClick={() => void add()}>
               Добавить и выбрать
             </button>
           </div>
@@ -1156,11 +1120,7 @@ function GridReferenceModal(props: {
                   </tr>
                 ) : (
                   props.rows.map((item) => (
-                    <tr
-                      key={str(item[idKey])}
-                      style={{ cursor: "pointer" }}
-                      onClick={() => props.onPick(item)}
-                    >
+                    <tr key={str(item[idKey])} onClick={() => props.onPick(item)}>
                       <td>{spec.display(item)}</td>
                     </tr>
                   ))
@@ -1275,8 +1235,7 @@ function ReferenceModal(props: {
           <span>Выбор: {cfg.title}</span>
           <button
             type="button"
-            className="clear-filters"
-            style={{ background: "none", fontSize: "24px", padding: "0 8px" }}
+            className="modal-header-close"
             onClick={props.onClose}
             aria-label="Закрыть"
           >
@@ -1284,8 +1243,9 @@ function ReferenceModal(props: {
           </button>
         </div>
         <div className="modal-body">
-          <div style={{ marginBottom: 12 }}>
-            <button type="button" className="btn-small" onClick={() => props.onClear()}>
+          <div className="modal-toolbar">
+            <span />
+            <button type="button" className="modal-toolbar-link" onClick={() => props.onClear()}>
               Сбросить связь
             </button>
           </div>
@@ -1461,15 +1421,15 @@ function ObjectCardModal(props: {
         <div className="modal-header">
           <span>
             {props.mode === "create"
-              ? "Новый объект"
-              : `Карточка объекта${
+              ? "Новый паспорт объекта"
+              : `Паспорт объекта${
                   props.row.register != null && props.row.register !== ""
                     ? ` — реестр ${str(props.row.register)}`
                     : ""
                 }`}
           </span>
-          <button type="button" className="btn-small" onClick={props.onClose}>
-            Отмена
+          <button type="button" className="modal-header-close" onClick={props.onClose} aria-label="Закрыть">
+            ×
           </button>
         </div>
         <div className="modal-body object-card-body">
@@ -1483,7 +1443,7 @@ function ObjectCardModal(props: {
                     <span className="object-card-display">{v || "—"}</span>
                     <button
                       type="button"
-                      className="btn-small"
+                      className="modal-footer-btn"
                       onClick={() => props.onOpenRef(col.ref!, col.key)}
                     >
                       Справочник
@@ -1500,7 +1460,7 @@ function ObjectCardModal(props: {
                     <span className="object-card-display">{v || "—"}</span>
                     <button
                       type="button"
-                      className="btn-small"
+                      className="modal-footer-btn"
                       onClick={() => props.onOpenPhones("legal")}
                     >
                       Телефоны
@@ -1517,7 +1477,7 @@ function ObjectCardModal(props: {
                     <span className="object-card-display">{v || "—"}</span>
                     <button
                       type="button"
-                      className="btn-small"
+                      className="modal-footer-btn"
                       onClick={() => props.onOpenPhones("owner")}
                     >
                       Телефоны
@@ -1536,7 +1496,7 @@ function ObjectCardModal(props: {
                     <span className="object-card-display">{v || "—"}</span>
                     <button
                       type="button"
-                      className="btn-small"
+                      className="modal-footer-btn"
                       onClick={() => props.onOpenRelation(kind)}
                     >
                       Список
@@ -1617,12 +1577,12 @@ function ObjectCardModal(props: {
           })}
         </div>
         <div className="object-card-footer">
-          <button type="button" className="btn-small" onClick={props.onClose}>
+          <button type="button" className="modal-footer-btn" onClick={props.onClose}>
             Отмена
           </button>
           <button
             type="button"
-            className="btn-small object-card-submit"
+            className="object-card-submit"
             disabled={props.submitting}
             onClick={() => props.onSubmit?.()}
           >
@@ -1655,9 +1615,14 @@ export function RhzoApp() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ui, setUi] = useState<UiState>({
     searchQuery: "",
-    sortColumn: null,
+    sortColumn: "id_registration",
     sortDirection: "asc",
   });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalElements, setTotalElements] = useState(0);
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [showExcluded, setShowExcluded] = useState(false);
 
   const [colWidths, setColWidths] = useState<Record<string, number>>(loadColWidths);
 
@@ -1968,29 +1933,63 @@ export function RhzoApp() {
     setLoading(true);
     setError(null);
     try {
+      const params = new URLSearchParams({
+        page: String(Math.max(0, page - 1)),
+        size: String(pageSize),
+      });
+      if (debouncedQ) params.set("q", debouncedQ);
+      if (ui.sortColumn) {
+        params.set("sort", ui.sortColumn);
+        params.set("dir", ui.sortDirection);
+      }
+      const apiPath = apiPathForSection(s);
+      if (
+        showExcluded &&
+        (apiPath.includes("object-place-trash") || apiPath.includes("magasin-factory"))
+      ) {
+        params.set("includeExcluded", "true");
+      }
+      const path = `${apiPath}?${params}`;
+      const data = await apiGet<PagePayload<Record<string, unknown>> | Record<string, unknown>[]>(path);
+      if (data && typeof data === "object" && !Array.isArray(data) && Array.isArray((data as PagePayload<Record<string, unknown>>).content)) {
+        const pageData = data as PagePayload<Record<string, unknown>>;
+        setRows(pageData.content);
+        setTotalElements(typeof pageData.totalElements === "number" ? pageData.totalElements : pageData.content.length);
+      } else {
+        let list = Array.isArray(data) ? data : [];
+        if (!showExcluded) list = list.filter((r) => !isExcludedRow(r));
+        setRows(list);
+        setTotalElements(list.length);
+      }
       if (s === "objects") {
-        const data = await apiGet<Record<string, unknown>[]>(apiPathForSection(s));
-        setRows(Array.isArray(data) ? data : []);
         try {
           const chars = await apiGet<Record<string, unknown>[]>("/api/characteristic-trash");
           setCharacteristicTrashList(Array.isArray(chars) ? chars : []);
         } catch {
           setCharacteristicTrashList([]);
         }
-      } else {
-        const data = await apiGet<Record<string, unknown>[]>(apiPathForSection(s));
-        setRows(Array.isArray(data) ? data : []);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка загрузки");
       setRows([]);
+      setTotalElements(0);
       if (s === "objects") setCharacteristicTrashList([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize, debouncedQ, ui.sortColumn, ui.sortDirection, showExcluded]);
 
   useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQ(ui.searchQuery.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [ui.searchQuery]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQ, ui.sortColumn, ui.sortDirection, pageSize, section, showExcluded]);
+
+  useEffect(() => {
+    if (section === "objects") return;
     void loadSection(section);
   }, [section, loadSection]);
 
@@ -2015,14 +2014,7 @@ export function RhzoApp() {
     setGridCard(null);
   }, [section]);
 
-  const objectColumnKeys = useMemo(() => OBJECT_COLUMNS.map((c) => c.key), []);
-
   const gridColumns = isGridSection(section) ? getGridDef(section).columns : null;
-
-  const gridUsesGridRef = useMemo(
-    () => !!(gridColumns && gridColumns.some((c) => c.gridRef)),
-    [gridColumns]
-  );
 
   const objectRowsWithMerged = useMemo(() => {
     if (section !== "objects") return rows;
@@ -2040,54 +2032,34 @@ export function RhzoApp() {
   );
 
   const displayRows = useMemo(() => {
-    const primaryIdField = idFieldForSection(section);
-    if (section === "objects") {
-      return filterAndSortData(
-        objectRowsWithMerged,
-        objectColumnKeys,
-        ui,
-        getObjectCellValue,
-        primaryIdField
-      );
-    }
-    if (gridColumns) {
-      const keys = gridColumns.map((c) => c.key);
-      return filterAndSortData(
-        rows,
-        keys,
-        ui,
-        (r, k) => {
-          const col = gridColumns.find((c) => c.key === k);
-          return col
-            ? gridCellValue(r, col, gridUsesGridRef ? gridRefLists : undefined)
-            : "";
-        },
-        primaryIdField
-      );
-    }
+    // Поиск/сортировка на бэке (page+size+q+sort+dir)
+    if (section === "objects") return objectRowsWithMerged;
     return rows;
-  }, [
-    objectRowsWithMerged,
-    rows,
-    section,
-    gridColumns,
-    objectColumnKeys,
-    ui,
-    gridUsesGridRef,
-    gridRefLists,
-  ]);
+  }, [objectRowsWithMerged, rows, section]);
 
-  const clearFilters = () =>
+  const totalPages = Math.max(1, Math.ceil(totalElements / pageSize) || 1);
+  const safePage = Math.min(page, totalPages);
+
+  const clearFilters = () => {
     setUi({
       searchQuery: "",
-      sortColumn: null,
+      sortColumn: section === "objects" ? "id_registration" : null,
       sortDirection: "asc",
     });
+    setShowExcluded(false);
+    setPage(1);
+  };
 
   const switchSection = (s: SectionId) => {
     setSection(s);
     setGridCard(null);
-    clearFilters();
+    setPage(1);
+    setShowExcluded(false);
+    setUi({
+      searchQuery: "",
+      sortColumn: s === "objects" ? "id_registration" : null,
+      sortDirection: "asc",
+    });
   };
 
   const triggerAddRow = () => {
@@ -3102,20 +3074,19 @@ export function RhzoApp() {
             </button>
           ))}
         </nav>
-        <div className="info-note" style={{ margin: "12px" }}>
-          <a
-            className="toolbar-link"
-            href="/api/reports/waste/detailed/export/pdf"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Экспорт отчёта PDF
-          </a>
-        </div>
       </aside>
 
       <main className="main-content">
-        <h1 className="page-title">{pageTitle}</h1>
+        {section === "objects" ? (
+          <RhzoObjectHub />
+        ) : (
+          <>
+        <div className="page-header-row">
+          <h1 className="page-title">{pageTitle}</h1>
+          <button type="button" className="page-add-btn" onClick={triggerAddRow}>
+            + Создать
+          </button>
+        </div>
 
         {error && <div className="error-banner">{error}</div>}
 
@@ -3123,10 +3094,11 @@ export function RhzoApp() {
           <div className="search-box">
             <input
               type="search"
-              placeholder="Поиск по всем полям таблицы..."
+              placeholder="Поиск по всей таблице (сервер)…"
               value={ui.searchQuery}
               onChange={(e) => setUi((p) => ({ ...p, searchQuery: e.target.value }))}
             />
+            <ExcludeFilterControl showExcluded={showExcluded} onChange={setShowExcluded} />
           </div>
           <button type="button" className="clear-filters" onClick={clearFilters}>
             Сбросить поиск и сортировку
@@ -3137,43 +3109,14 @@ export function RhzoApp() {
           <div className="loading">Загрузка...</div>
         ) : (
           <>
+            <div className="data-table-panel">
             <div className="data-table-wrapper">
               <table className="data-table">
                 <thead>
                   <tr>
-                    {section === "objects" &&
-                      OBJECT_TABLE_COLUMNS.map((col) => {
-                        const ind =
-                          ui.sortColumn === col.key
-                            ? ui.sortDirection === "asc"
-                              ? "▲"
-                              : "▼"
-                            : "⇅";
-                        const w = getColWidth(col.key);
-                        return (
-                          <th
-                            key={col.key}
-                            style={{ width: w, minWidth: 64 }}
-                            onClick={() => sortHeaderClick(col.key)}
-                          >
-                            <span className="th-label">
-                              {col.label} <span className="sort-icon">{ind}</span>
-                            </span>
-                            <span
-                              className="col-resize-handle"
-                              role="separator"
-                              aria-hidden
-                              title="Потяните, чтобы изменить ширину столбца"
-                              onClick={(e) => e.stopPropagation()}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                beginColumnResize(col.key, e.clientX);
-                              }}
-                            />
-                          </th>
-                        );
-                      })}
+                    <th className="col-actions" aria-label="Действия">
+                      Действия
+                    </th>
                     {gridColumns &&
                       gridColumns.map((col) => {
                         const ind =
@@ -3187,6 +3130,7 @@ export function RhzoApp() {
                           <th
                             key={col.key}
                             style={{ width: w, minWidth: 64 }}
+                            className={ui.sortColumn === col.key ? "th-sorted" : undefined}
                             onClick={() => sortHeaderClick(col.key)}
                           >
                             <span className="th-label">
@@ -3207,484 +3151,9 @@ export function RhzoApp() {
                           </th>
                         );
                       })}
-                    <th className="col-actions" aria-label="Действия" />
                   </tr>
                 </thead>
                 <tbody>
-                  {section === "objects" &&
-                    displayRows.map((row, rowIndex) => {
-                      const idx = resolveObjectRowIndex(row);
-                      return (
-                        <tr key={`obj-${rowIndex}-${str(row.id_object_place_trash)}`}>
-                          {OBJECT_TABLE_COLUMNS.map((col) => {
-                            const cw = getColWidth(col.key);
-                            if (col.ref) {
-                              const rk = col.ref;
-                              const val = getObjectCellValue(row, col.key);
-                              const rowRegionId = resolveObjectRegionId(row);
-                              const sug = refCache[rk].filter((r) => {
-                                if (rk === "cities" && !cityMatchesRegion(r, rowRegionId)) {
-                                  return false;
-                                }
-                                return REF_CONFIG[rk]
-                                  .display(r)
-                                  .toLowerCase()
-                                  .includes((editingRef?.filter ?? "").toLowerCase());
-                              });
-                              const showAc =
-                                editingRef?.kind === rk &&
-                                editingRef.colKey === col.key &&
-                                editingRef.rowIndex === idx &&
-                                editingRef.filter.length > 0;
-                              return (
-                                <td
-                                  key={col.key}
-                                  className="reference-cell"
-                                  style={{ width: cw, minWidth: 64 }}
-                                >
-                                  {editingRef?.kind === rk &&
-                                  editingRef.colKey === col.key &&
-                                  editingRef.rowIndex === idx ? (
-                                    <div className="cell-editor" style={{ position: "relative" }}>
-                                      <input
-                                        className="autocomplete-input cell-input-minimal"
-                                        autoFocus
-                                        value={editingRef.filter}
-                                        placeholder="Введите или выберите..."
-                                        onChange={(e) =>
-                                          setEditingRef({
-                                            kind: rk,
-                                            rowIndex: idx,
-                                            colKey: col.key,
-                                            filter: e.target.value,
-                                          })
-                                        }
-                                        onBlur={() =>
-                                          setTimeout(() => setEditingRef(null), 150)
-                                        }
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") setEditingRef(null);
-                                        }}
-                                      />
-                                      <button
-                                        type="button"
-                                        className="table-icon-btn"
-                                        title="Открыть справочник"
-                                        aria-label="Открыть справочник"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => openRefModal(rk, idx, col.key)}
-                                      >
-                                        <IconPencil />
-                                      </button>
-                                      {showAc && sug.length > 0 && (
-                                        <div
-                                          className="autocomplete-list"
-                                          style={{ position: "absolute", top: "100%", left: 0, right: 32 }}
-                                        >
-                                          <div
-                                            className="autocomplete-item autocomplete-item-clear"
-                                            onMouseDown={(e) => e.preventDefault()}
-                                            onClick={() => void clearRef(rk, idx)}
-                                          >
-                                            — Не выбрано
-                                          </div>
-                                          {sug.slice(0, 12).map((s) => {
-                                            const idKey =
-                                              rk === "cities"
-                                                ? "id_cities"
-                                                : rk === "region"
-                                                  ? "id_region"
-                                                : rk === "group"
-                                                  ? "id_group_place_save"
-                                                  : rk === "storage"
-                                                    ? "id_storage_scheme"
-                                                    : rk === "degree"
-                                                      ? "id_gruops_degree"
-                                                      : "id_magazin_trash";
-                                            return (
-                                              <div
-                                                key={str(s[idKey])}
-                                                className="autocomplete-item"
-                                                onMouseDown={(e) => e.preventDefault()}
-                                                onClick={() => {
-                                                  void pickRef(rk, idx, Number(s[idKey]));
-                                                  setEditingRef(null);
-                                                }}
-                                              >
-                                                {REF_CONFIG[rk].display(s)}
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div
-                                      role="button"
-                                      tabIndex={0}
-                                      style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                      }}
-                                      onClick={() =>
-                                        setEditingRef({
-                                          kind: rk,
-                                          rowIndex: idx,
-                                          colKey: col.key,
-                                          filter: val,
-                                        })
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ")
-                                          setEditingRef({
-                                            kind: rk,
-                                            rowIndex: idx,
-                                            colKey: col.key,
-                                            filter: val,
-                                          });
-                                      }}
-                                    >
-                                      <span>
-                                        {val || (
-                                          <span className="cell-placeholder">[выбрать]</span>
-                                        )}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="cell-ref-action table-icon-btn"
-                                        title="Открыть справочник"
-                                        aria-label="Открыть справочник"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          openRefModal(rk, idx, col.key);
-                                        }}
-                                      >
-                                        <IconPencil />
-                                      </button>
-                                    </div>
-                                  )}
-                                </td>
-                              );
-                            }
-                            if (col.key === "__phones" || col.key === "__phones_owner") {
-                              const v = getObjectCellValue(row, col.key);
-                              const phoneKind: PhoneKind =
-                                col.key === "__phones" ? "legal" : "owner";
-                              const editingPh =
-                                editingPhone?.rowIndex === idx ? editingPhone : null;
-                              return (
-                                <td
-                                  key={col.key}
-                                  className="reference-cell"
-                                  style={{ width: cw, minWidth: 64 }}
-                                >
-                                  {editingPh ? (
-                                    <div className="cell-editor" style={{ position: "relative" }}>
-                                      <input
-                                        className="autocomplete-input cell-input-minimal"
-                                        autoFocus
-                                        value={editingPh.filter}
-                                        placeholder="Номер, Enter — добавить"
-                                        onChange={(e) =>
-                                          setEditingPhone({
-                                            rowIndex: idx,
-                                            filter: e.target.value,
-                                          })
-                                        }
-                                        onBlur={() =>
-                                          setTimeout(() => setEditingPhone(null), 150)
-                                        }
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") {
-                                            const t = editingPh.filter.trim();
-                                            if (t) void addPhoneForObject(idx, t);
-                                            setEditingPhone(null);
-                                          }
-                                        }}
-                                      />
-                                      <button
-                                        type="button"
-                                        className="table-icon-btn"
-                                        title="Список телефонов"
-                                        aria-label="Список телефонов"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          setPhoneModal({
-                                            target: "row",
-                                            rowIndex: idx,
-                                            kind: phoneKind,
-                                          });
-                                          setEditingPhone(null);
-                                        }}
-                                      >
-                                        <IconPencil />
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div
-                                      role="button"
-                                      tabIndex={0}
-                                      style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                      }}
-                                      onClick={() =>
-                                        setEditingPhone({ rowIndex: idx, filter: v })
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ")
-                                          setEditingPhone({ rowIndex: idx, filter: v });
-                                      }}
-                                    >
-                                      <span>
-                                        {v || (
-                                          <span className="cell-placeholder">[выбрать]</span>
-                                        )}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="cell-ref-action table-icon-btn"
-                                        title="Список телефонов"
-                                        aria-label="Список телефонов"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setPhoneModal({
-                                            target: "row",
-                                            rowIndex: idx,
-                                            kind: phoneKind,
-                                          });
-                                        }}
-                                      >
-                                        <IconPencil />
-                                      </button>
-                                    </div>
-                                  )}
-                                </td>
-                              );
-                            }
-                            if (col.key === "__around" || col.key === "__natural") {
-                              const kind: ObjectRelationKind =
-                                col.key === "__around" ? "around" : "natural";
-                              const v = getObjectCellValue(row, col.key);
-                              const editingRel =
-                                editingRelation?.rowIndex === idx && editingRelation.kind === kind
-                                  ? editingRelation
-                                  : null;
-                              return (
-                                <td
-                                  key={col.key}
-                                  className="reference-cell"
-                                  style={{ width: cw, minWidth: 64 }}
-                                >
-                                  {editingRel ? (
-                                    <div className="cell-editor" style={{ position: "relative" }}>
-                                      <input
-                                        className="autocomplete-input cell-input-minimal"
-                                        autoFocus
-                                        value={editingRel.filter}
-                                        placeholder="Введите, Enter - добавить"
-                                        onFocus={() => void loadObjectRelation(idx, kind)}
-                                        onChange={(e) =>
-                                          setEditingRelation({
-                                            kind,
-                                            rowIndex: idx,
-                                            filter: e.target.value,
-                                          })
-                                        }
-                                        onBlur={() =>
-                                          setTimeout(() => setEditingRelation(null), 150)
-                                        }
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") {
-                                            const t = editingRel.filter.trim();
-                                            if (t) void addObjectRelation(idx, kind, t);
-                                            setEditingRelation(null);
-                                          }
-                                        }}
-                                      />
-                                      <button
-                                        type="button"
-                                        className="table-icon-btn"
-                                        title="Список"
-                                        aria-label="Список"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          setRelationModal({
-                                            target: "row",
-                                            rowIndex: idx,
-                                            kind,
-                                          });
-                                          void loadObjectRelation(idx, kind);
-                                          void loadGlobalRelationLists();
-                                          setEditingRelation(null);
-                                        }}
-                                      >
-                                        <IconPencil />
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div
-                                      role="button"
-                                      tabIndex={0}
-                                      style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                      }}
-                                      onClick={() =>
-                                        setEditingRelation({
-                                          kind,
-                                          rowIndex: idx,
-                                          filter: "",
-                                        })
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ")
-                                          setEditingRelation({
-                                            kind,
-                                            rowIndex: idx,
-                                            filter: "",
-                                          });
-                                      }}
-                                    >
-                                      <span>
-                                        {v || (
-                                          <span className="cell-placeholder">[добавить]</span>
-                                        )}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="cell-ref-action table-icon-btn"
-                                        title="Список"
-                                        aria-label="Список"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setRelationModal({
-                                            target: "row",
-                                            rowIndex: idx,
-                                            kind,
-                                          });
-                                          void loadObjectRelation(idx, kind);
-                                          void loadGlobalRelationLists();
-                                        }}
-                                      >
-                                        <IconPencil />
-                                      </button>
-                                    </div>
-                                  )}
-                                </td>
-                              );
-                            }
-                            const editable = col.editable !== false;
-                            const v = getObjectCellValue(row, col.key);
-                            if (col.type === "bool") {
-                              return (
-                                <td key={col.key} style={{ width: cw, minWidth: 64 }}>
-                                  <select
-                                    key={`${str(row.id_object_place_trash)}-${col.key}-${str(row[col.key])}`}
-                                    className="filter-select cell-select-minimal"
-                                    style={{ width: "100%" }}
-                                    defaultValue={v}
-                                    onChange={(e) =>
-                                      void onObjectFieldBlur(
-                                        idx,
-                                        col.key,
-                                        e.target.value,
-                                        "bool"
-                                      )
-                                    }
-                                  >
-                                    <option value="">—</option>
-                                    <option value="Да">Да</option>
-                                    <option value="Нет">Нет</option>
-                                  </select>
-                                </td>
-                              );
-                            }
-                            if (col.multiline && editable) {
-                              return (
-                                <td
-                                  key={col.key}
-                                  className="td-cell-multiline"
-                                  style={{ width: cw, minWidth: 64 }}
-                                >
-                                  <ObjectCellTextarea
-                                    rowId={row.id_object_place_trash as number}
-                                    colKey={col.key}
-                                    value={v}
-                                    readOnly={false}
-                                    onCommit={(nv) =>
-                                      void onObjectFieldBlur(
-                                        idx,
-                                        col.key,
-                                        nv,
-                                        col.type ?? "text"
-                                      )
-                                    }
-                                  />
-                                </td>
-                              );
-                            }
-                            return (
-                              <td key={col.key} style={{ width: cw, minWidth: 64 }}>
-                                <input
-                                  key={`${str(row.id_object_place_trash)}-${col.key}-${v}`}
-                                  className="cell-input-minimal"
-                                  defaultValue={v}
-                                  type={
-                                    col.type === "number"
-                                      ? "number"
-                                      : col.type === "float"
-                                        ? "text"
-                                        : col.type === "date"
-                                          ? "date"
-                                          : "text"
-                                  }
-                                  readOnly={!editable}
-                                  style={!editable ? { background: "#f4f4f5" } : undefined}
-                                  onBlur={(e) =>
-                                    editable &&
-                                    void onObjectFieldBlur(
-                                      idx,
-                                      col.key,
-                                      e.target.value,
-                                      col.type ?? "text"
-                                    )
-                                  }
-                                />
-                              </td>
-                            );
-                          })}
-                          <td className="col-actions">
-                            <button
-                              type="button"
-                              className="btn-small"
-                              onClick={() => {
-                                setObjectCreateDraft(null);
-                                const merged = mergeCharacteristicsIntoObjectRows(
-                                  [rows[idx]],
-                                  characteristicTrashList
-                                )[0];
-                                setObjectCardEditDraft({ ...merged });
-                                setObjectCardRowIndex(idx);
-                              }}
-                            >
-                              Карточка
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-small"
-                              onClick={() => void deleteRow("objects", row)}
-                            >
-                              Удалить
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
                   {isGridSection(section) &&
                     gridColumns &&
                     displayRows.map((row, rowIndex) => {
@@ -3694,6 +3163,35 @@ export function RhzoApp() {
                       const rid = row[idf];
                       return (
                         <tr key={`grid-${sid}-${rowIndex}-${str(row[idf])}`}>
+                          <td className="col-actions">
+                            {hasGridCard(sid) ? (
+                              <button
+                                type="button"
+                                className="table-icon-btn table-icon-card"
+                                title="Паспорт"
+                                aria-label="Паспорт"
+                                onClick={() => {
+                                  setGridCard({
+                                    section: sid,
+                                    mode: "edit",
+                                    rowIndex: idx,
+                                    draft: { ...row },
+                                  });
+                                }}
+                              >
+                                <IconCard />
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="table-icon-btn table-icon-danger"
+                              title="Удалить"
+                              aria-label="Удалить"
+                              onClick={() => void deleteRow(sid, row)}
+                            >
+                              <IconTrash />
+                            </button>
+                          </td>
                           {gridColumns.map((col) => {
                             const gcw = getColWidth(col.key);
                             const autoFill =
@@ -3969,31 +3467,6 @@ export function RhzoApp() {
                               </td>
                             );
                           })}
-                          <td className="col-actions">
-                            {hasGridCard(sid) ? (
-                              <button
-                                type="button"
-                                className="btn-small"
-                                onClick={() => {
-                                  setGridCard({
-                                    section: sid,
-                                    mode: "edit",
-                                    rowIndex: idx,
-                                    draft: { ...row },
-                                  });
-                                }}
-                              >
-                                Карточка
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="btn-small"
-                              onClick={() => void deleteRow(sid, row)}
-                            >
-                              Удалить
-                            </button>
-                          </td>
                         </tr>
                       );
                     })}
@@ -4012,15 +3485,55 @@ export function RhzoApp() {
               </table>
             </div>
 
-            <div className="info-note">
-              Показано {displayRows.length} из {rows.length} записей. Горизонтальная прокрутка — для широких
-              таблиц.
+            <div className="table-pager">
+              <span className="table-pager-info">
+                Стр. {safePage} из {totalPages} · всего {Math.max(0, totalElements)}
+              </span>
+              <label className="table-pager-size">
+                На странице
+                <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="table-pager-nav" role="navigation" aria-label="Страницы таблицы">
+                <button type="button" className="table-page-btn" disabled={safePage <= 1} onClick={() => setPage(1)}>
+                  «
+                </button>
+                <button
+                  type="button"
+                  className="table-page-btn"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="table-page-btn"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  ›
+                </button>
+                <button
+                  type="button"
+                  className="table-page-btn"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage(totalPages)}
+                >
+                  »
+                </button>
+              </div>
+            </div>
             </div>
           </>
         )}
-        <button type="button" className="floating-add-btn" onClick={triggerAddRow}>
-          Добавить строку
-        </button>
+          </>
+        )}
       </main>
 
       {refModal && (
@@ -4238,8 +3751,8 @@ export function RhzoApp() {
         <RelationModal
           title={
             relationModal.kind === "around"
-              ? "Природоохранные сооружения"
-              : "Населенные пункты"
+              ? "Окружающие здания"
+              : "Природоохранные здания"
           }
           linkedRows={
             (objectCreateDisplay[
@@ -4281,8 +3794,8 @@ export function RhzoApp() {
           <RelationModal
             title={
               relationModal.kind === "around"
-                ? "Природоохранные сооружения"
-                : "Населенные пункты"
+                ? "Окружающие здания"
+                : "Природоохранные здания"
             }
             linkedRows={
               (rows[relationModal.rowIndex][

@@ -54,8 +54,8 @@ export function GridCardModal(props: GridCardModalProps) {
       >
         <div className="modal-header">
           <span>{title}</span>
-          <button type="button" className="btn-small" onClick={onClose}>
-            Отмена
+          <button type="button" className="modal-header-close" onClick={onClose} aria-label="Закрыть">
+            ×
           </button>
         </div>
         <div className="modal-body object-card-body">
@@ -70,7 +70,7 @@ export function GridCardModal(props: GridCardModalProps) {
                     <span className="object-card-display">{v || "—"}</span>
                     <button
                       type="button"
-                      className="btn-small"
+                      className="modal-footer-btn"
                       onClick={() => onOpenGridRef(col.key)}
                     >
                       Справочник
@@ -163,12 +163,12 @@ export function GridCardModal(props: GridCardModalProps) {
           })}
         </div>
         <div className="object-card-footer">
-          <button type="button" className="btn-small" onClick={onClose}>
+          <button type="button" className="modal-footer-btn" onClick={onClose}>
             Отмена
           </button>
           <button
             type="button"
-            className="btn-small object-card-submit"
+            className="object-card-submit"
             disabled={submitting}
             onClick={onSubmit}
           >
