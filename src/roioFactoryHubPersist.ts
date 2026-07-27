@@ -314,7 +314,7 @@ async function syncPhones(factoryId: number, phones: HubPhone[], baseline: HubBa
         number,
         ur_ob: ph.ur_ob,
       });
-      await apiPost(
+      await apiPut(
         `/api/number-phone-count?objectPlaceId=${factoryId}&phoneId=${ph.id_phone_number}&urOb=${ph.ur_ob}`,
         {}
       );

@@ -101,6 +101,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   });
   const text = await readBodyAsText(res);
   if (!res.ok) throw await requestError("PUT", path, res, text);
+  if (!text.trim()) return undefined as T;
   return parseJsonBody<T>(res, text);
 }
 
