@@ -20,6 +20,7 @@ export const ROO_GRID_REF_SPECS: Record<
   {
     apiPath: string;
     idField: string;
+    paginated?: boolean;
     nullable?: boolean;
     display: (r: Record<string, unknown>) => string;
     modalTitle: string;
@@ -120,6 +121,7 @@ export const ROO_GRID_REF_SPECS: Record<
   technology: {
     apiPath: "/api/technology",
     idField: "id_technology",
+    paginated: true,
     display: (r) => {
       const mag = r.id_magazin_trash as Record<string, unknown> | undefined;
       if (mag && typeof mag === "object") {
@@ -137,6 +139,7 @@ export const ROO_GRID_REF_SPECS: Record<
   magasinFactory: {
     apiPath: "/api/magasin-factory",
     idField: "id_magasin_factory",
+    paginated: true,
     display: (r) =>
       `${String(r.id_registration ?? "").trim()} — ${String(r.name_obj ?? "").trim()}`.trim(),
     modalTitle: "Предприятие",
@@ -162,6 +165,7 @@ export const ROO_GRID_REF_SPECS: Record<
   numberPhone: {
     apiPath: "/api/number-phone",
     idField: "id_phone_number",
+    paginated: true,
     nullable: true,
     display: (r) => String(r.number ?? ""),
     modalTitle: "Телефон",

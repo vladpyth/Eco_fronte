@@ -28,6 +28,7 @@ type GridCol = {
 type GridRefSpec = {
   apiPath: string;
   idField: string;
+  paginated?: boolean;
   nullable?: boolean;
   display: (r: Record<string, unknown>) => string;
   modalTitle: string;
@@ -279,6 +280,42 @@ function GridReferenceModal(props: {
   const { spec } = props;
   const idKey = spec.idField;
   const [draft, setDraft] = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [remoteRows, setRemoteRows] = useState<Record<string, unknown>[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    if (!spec.paginated) return;
+    let active = true;
+    const params = new URLSearchParams({ page: "0", size: "50" });
+    if (debouncedSearch) params.set("q", debouncedSearch);
+    setSearching(true);
+    void apiGet<PagePayload<Record<string, unknown>>>(`${spec.apiPath}?${params}`)
+      .then((data) => {
+        if (active) setRemoteRows(Array.isArray(data.content) ? data.content : []);
+      })
+      .catch(() => {
+        if (active) setRemoteRows([]);
+      })
+      .finally(() => {
+        if (active) setSearching(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [spec, debouncedSearch]);
+
+  const visibleRows = spec.paginated
+    ? remoteRows
+    : props.rows.filter((row) =>
+        spec.display(row).toLowerCase().includes(search.trim().toLowerCase())
+      );
 
   const add = async () => {
     try {
@@ -314,6 +351,16 @@ function GridReferenceModal(props: {
             <input
               className="cell-input-minimal"
               style={{ flex: 1, minWidth: 160 }}
+              type="search"
+              placeholder="Поиск..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="modal-toolbar">
+            <input
+              className="cell-input-minimal"
+              style={{ flex: 1, minWidth: 160 }}
               placeholder={spec.placeholder}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -331,12 +378,16 @@ function GridReferenceModal(props: {
                 </tr>
               </thead>
               <tbody>
-                {props.rows.length === 0 ? (
+                {searching ? (
+                  <tr>
+                    <td style={{ color: "#71717a" }}>Загрузка...</td>
+                  </tr>
+                ) : visibleRows.length === 0 ? (
                   <tr>
                     <td style={{ color: "#71717a" }}>Нет данных</td>
                   </tr>
                 ) : (
-                  props.rows.map((item) => (
+                  visibleRows.map((item) => (
                     <tr key={str(item[idKey])} onClick={() => props.onPick(item)}>
                       <td>{spec.display(item)}</td>
                     </tr>
@@ -370,7 +421,8 @@ function GridRefCell(props: {
   const isEditing = editing?.kind === gk && editing.rowIndex === idx && editing.colKey === col.key;
   const sug = list.filter((r) => spec.display(r).toLowerCase().includes((editing?.filter ?? "").toLowerCase()));
   const showAc = isEditing && editing!.filter.length > 0 && (spec.nullable || sug.length > 0);
-  const startEdit = (filter: string) => props.setEditing({ kind: gk, rowIndex: idx, colKey: col.key, filter });
+  const startEdit = (filter: string) =>
+    props.setEditing({ kind: gk, rowIndex: idx, colKey: col.key, filter });
   const pencilBtn = (
     <button type="button" className="table-icon-btn" title="Открыть справочник" aria-label="Открыть справочник" onMouseDown={(e) => e.preventDefault()} onClick={props.openModal}>
       <IconPencil />
@@ -505,6 +557,11 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [debouncedLocation, setDebouncedLocation] = useState("");
+  const [wasteCodeFilter, setWasteCodeFilter] = useState("");
+  const [debouncedWasteCode, setDebouncedWasteCode] = useState("");
+  const [wasteSource, setWasteSource] = useState("");
   const [colWidths, setColWidths] = useState(() => loadColWidths(colWidthsStorageKey));
   const [gridRefLists, setGridRefLists] = useState<Record<string, Record<string, unknown>[]>>({});
   const gridRefListsRef = useRef(gridRefLists);
@@ -575,8 +632,40 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
   }, [loadGridRefLists]);
 
   const mergeGridRefIntoCache = useCallback((kind: string, created: Record<string, unknown>) => {
-    setGridRefLists((prev) => ({ ...prev, [kind]: [...(prev[kind] ?? []), created] }));
-  }, []);
+    setGridRefLists((prev) => {
+      const spec = gridRefSpecs[kind];
+      const id = spec ? pickFk(created, spec.idField) : 0;
+      const current = prev[kind] ?? [];
+      const withoutDuplicate = id > 0
+        ? current.filter((row) => pickFk(row, spec.idField) !== id)
+        : current;
+      return { ...prev, [kind]: [...withoutDuplicate, created] };
+    });
+  }, [gridRefSpecs]);
+
+  useEffect(() => {
+    if (!editingGridRef) return;
+    const spec = gridRefSpecs[editingGridRef.kind];
+    if (!spec?.paginated) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ page: "0", size: "50" });
+      const query = editingGridRef.filter.trim();
+      if (query) params.set("q", query);
+      void apiGet<PagePayload<Record<string, unknown>>>(`${spec.apiPath}?${params}`)
+        .then((data) => {
+          if (!active) return;
+          for (const row of Array.isArray(data.content) ? data.content : []) {
+            mergeGridRefIntoCache(editingGridRef.kind, row);
+          }
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [editingGridRef, gridRefSpecs, mergeGridRefIntoCache]);
 
   const loadSection = useCallback(async (sid: string) => {
     const def = getSection(sid);
@@ -592,6 +681,11 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
           size: String(pageSize),
         });
         if (debouncedQ) params.set("q", debouncedQ);
+        if (def.apiPath.includes("magasin-factory")) {
+          if (debouncedLocation) params.set("location", debouncedLocation);
+          if (debouncedWasteCode) params.set("wasteCode", debouncedWasteCode);
+          if (wasteSource) params.set("wasteSource", wasteSource);
+        }
         if (ui.sortColumn) {
           params.set("sort", ui.sortColumn);
           params.set("dir", ui.sortDirection);
@@ -617,13 +711,17 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [getSection, enrichLoadedRows, serverPagination, page, pageSize, debouncedQ, ui.sortColumn, ui.sortDirection, showExcluded]);
+  }, [getSection, enrichLoadedRows, serverPagination, page, pageSize, debouncedQ, debouncedLocation, debouncedWasteCode, wasteSource, ui.sortColumn, ui.sortDirection, showExcluded]);
 
   useEffect(() => {
     if (!serverPagination) return;
-    const t = setTimeout(() => setDebouncedQ(ui.searchQuery.trim()), 300);
+    const t = setTimeout(() => {
+      setDebouncedQ(ui.searchQuery.trim());
+      setDebouncedLocation(locationFilter.trim());
+      setDebouncedWasteCode(wasteCodeFilter.trim());
+    }, 300);
     return () => clearTimeout(t);
-  }, [ui.searchQuery, serverPagination]);
+  }, [ui.searchQuery, locationFilter, wasteCodeFilter, serverPagination]);
 
   useEffect(() => {
     if (isLeadingSection) return;
@@ -637,8 +735,13 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
     setPage(1);
     setDebouncedQ("");
     setShowExcluded(false);
+    setLocationFilter("");
+    setDebouncedLocation("");
+    setWasteCodeFilter("");
+    setDebouncedWasteCode("");
+    setWasteSource("");
   }, [section]);
-  useEffect(() => { setPage(1); }, [ui.searchQuery, ui.sortColumn, ui.sortDirection, pageSize, showExcluded]);
+  useEffect(() => { setPage(1); }, [ui.searchQuery, locationFilter, wasteCodeFilter, wasteSource, ui.sortColumn, ui.sortDirection, pageSize, showExcluded]);
 
   useEffect(() => {
     if (!enrichLoadedRows) return;
@@ -680,6 +783,9 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
   const clearFilters = () => {
     setUi({ searchQuery: "", sortColumn: null, sortDirection: "asc" });
     setShowExcluded(false);
+    setLocationFilter("");
+    setWasteCodeFilter("");
+    setWasteSource("");
     setPage(1);
   };
   const switchSection = (s: string) => {
@@ -1003,7 +1109,48 @@ export function GridRegistryApp(props: GridRegistryAppProps) {
           <div className="search-box">
             <input type="search" placeholder="Поиск по всем полям таблицы..." value={ui.searchQuery}
               onChange={(e) => setUi((p) => ({ ...p, searchQuery: e.target.value }))} />
-            <ExcludeFilterControl showExcluded={showExcluded} onChange={setShowExcluded} />
+            <ExcludeFilterControl
+              showExcluded={showExcluded}
+              onChange={setShowExcluded}
+              hasAdditionalFilters={Boolean(locationFilter || wasteCodeFilter || wasteSource)}
+            >
+              {sectionDef.apiPath.includes("magasin-factory") ? (
+                <>
+                  <label className="hub-filter-field">
+                    <span className="hub-filter-field-label">Область или район</span>
+                    <input
+                      type="search"
+                      className="hub-filter-field-control"
+                      placeholder="Введите название"
+                      value={locationFilter}
+                      onChange={(e) => setLocationFilter(e.target.value)}
+                    />
+                  </label>
+                  <label className="hub-filter-field">
+                    <span className="hub-filter-field-label">Код отхода</span>
+                    <input
+                      type="search"
+                      className="hub-filter-field-control"
+                      placeholder="Введите код"
+                      value={wasteCodeFilter}
+                      onChange={(e) => setWasteCodeFilter(e.target.value)}
+                    />
+                  </label>
+                  <label className="hub-filter-field">
+                    <span className="hub-filter-field-label">Происхождение отходов</span>
+                    <select
+                      className="hub-filter-field-control"
+                      value={wasteSource}
+                      onChange={(e) => setWasteSource(e.target.value)}
+                    >
+                      <option value="">Все отходы</option>
+                      <option value="own">Собственные отходы</option>
+                      <option value="external">От сторонних организаций</option>
+                    </select>
+                  </label>
+                </>
+              ) : null}
+            </ExcludeFilterControl>
           </div>
           <button type="button" className="clear-filters" onClick={clearFilters}>Сбросить поиск и сортировку</button>
         </div>

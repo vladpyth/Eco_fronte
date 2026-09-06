@@ -3,6 +3,15 @@ import { ROO_GRID_REF_SPECS, type RooGridRefKind } from "./rooGridRefConfig";
 
 export type { RooGridRefKind } from "./rooGridRefConfig";
 
+type PagePayload<T> = { content: T[] };
+
+async function firstPageRow(path: string): Promise<Record<string, unknown> | undefined> {
+  const data = await apiGet<PagePayload<Record<string, unknown>>>(
+    `${path}?page=0&size=1`
+  );
+  return Array.isArray(data.content) ? data.content[0] : undefined;
+}
+
 export type RooSectionId =
   | "magasin-factory"
   | "my-trash"
@@ -295,14 +304,14 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
       value_trash: Number(row.value_trash ?? 0),
     }),
     createDefault: async () => {
-      const [factories, trash] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/magasin-factory"),
-        apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
+      const [factory, trash] = await Promise.all([
+        firstPageRow("/api/magasin-factory"),
+        firstPageRow("/api/magazin-trash"),
       ]);
       return {
-        id_magasin_factory: pickFkOrNull(factories[0], "id_magasin_factory"),
+        id_magasin_factory: pickFkOrNull(factory, "id_magasin_factory"),
         id_class_danger: null,
-        id_magazin_trash: pickFkOrNull(trash[0], "id_magazin_trash"),
+        id_magazin_trash: pickFkOrNull(trash, "id_magazin_trash"),
         value_trash: 0,
       };
     },
@@ -330,15 +339,15 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
       value_drop_trash: Number(row.value_drop_trash ?? 0),
     }),
     createDefault: async () => {
-      const [factories, classes, names] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/magasin-factory"),
-        apiGet<Record<string, unknown>[]>("/api/class-danger"),
-        apiGet<Record<string, unknown>[]>("/api/name-drop-air-trash"),
+      const [factory, classDanger, name] = await Promise.all([
+        firstPageRow("/api/magasin-factory"),
+        firstPageRow("/api/class-danger"),
+        firstPageRow("/api/name-drop-air-trash"),
       ]);
       return {
-        id_magasin_factory: pickFk(factories[0], "id_magasin_factory"),
-        id_class_danger: pickFk(classes[0], "id_class_danger"),
-        id_name_grope_air: pickFk(names[0], "id_name_grope_air"),
+        id_magasin_factory: pickFk(factory, "id_magasin_factory"),
+        id_class_danger: pickFk(classDanger, "id_class_danger"),
+        id_name_grope_air: pickFk(name, "id_name_grope_air"),
         value_drop_trash: 1,
       };
     },
@@ -359,9 +368,9 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
       name_trash: S(row.name_trash).trim() || "Отход",
     }),
     createDefault: async () => {
-      const classes = await apiGet<Record<string, unknown>[]>("/api/class-danger");
+      const classDanger = await firstPageRow("/api/class-danger");
       return {
-        id_class_danger: pickFk(classes[0], "id_class_danger"),
+        id_class_danger: pickFk(classDanger, "id_class_danger"),
         code_trash: 10000000 + (Date.now() % 89999999),
         name_trash: "Новый отход",
       };
@@ -398,17 +407,17 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
       };
     },
     createDefault: async () => {
-      const [factories, classes, trash, phys] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/magasin-factory"),
-        apiGet<Record<string, unknown>[]>("/api/class-danger"),
-        apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
-        apiGet<Record<string, unknown>[]>("/api/phys-state-trash"),
+      const [factory, classDanger, trash, phys] = await Promise.all([
+        firstPageRow("/api/magasin-factory"),
+        firstPageRow("/api/class-danger"),
+        firstPageRow("/api/magazin-trash"),
+        firstPageRow("/api/phys-state-trash"),
       ]);
       return {
-        id_magasin_factory: pickFk(factories[0], "id_magasin_factory"),
-        id_class_danger: pickFk(classes[0], "id_class_danger"),
-        id_magazin_trash: pickFk(trash[0], "id_magazin_trash"),
-        id_phys_trash: pickFk(phys[0], "id_mame_group"),
+        id_magasin_factory: pickFk(factory, "id_magasin_factory"),
+        id_class_danger: pickFk(classDanger, "id_class_danger"),
+        id_magazin_trash: pickFk(trash, "id_magazin_trash"),
+        id_phys_trash: pickFk(phys, "id_mame_group"),
       };
     },
   },
@@ -493,13 +502,13 @@ export const ROO_SECTIONS: Record<RooSectionId, RooSectionDef> = {
       };
     },
     createDefault: async () => {
-      const [regions, districts] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/region"),
-        apiGet<Record<string, unknown>[]>("/api/district"),
+      const [region, district] = await Promise.all([
+        firstPageRow("/api/region"),
+        firstPageRow("/api/district"),
       ]);
       return {
-        idRegion: pickFk(regions[0], "id_region") || 1,
-        idDistrict: pickFk(districts[0], "id_district") || 1,
+        idRegion: pickFk(region, "id_region") || 1,
+        idDistrict: pickFk(district, "id_district") || 1,
         name_cities: "Новый город",
         index: "000000",
       };

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { apiDelete, apiGet, apiPost, apiPut, formatCity, formatDegree, formatGroupPlace, formatRegion, formatStorage, getNestedId, objectPlaceTrashToRequest } from "./api";
+import { apiDelete, apiGet, apiPost, apiPut, formatDegree, formatGroupPlace, formatRegion, formatStorage, getNestedId, objectPlaceTrashToRequest } from "./api";
 import { DateField, formatDateRu } from "./DateField";
 import { ExcludeFilterControl } from "./ExcludeFilterControl";
 import "./RoioFactoryHub.css";
@@ -74,7 +74,7 @@ const LIST_COLS: { key: string; label: string }[] = [
 const OBJECT_FIELDS: {
   key: string;
   label: string;
-  type?: "text" | "date" | "number" | "float" | "bool" | "textarea" | "ref";
+  type?: "text" | "date" | "number" | "float" | "bool" | "textarea" | "ref" | "derived";
   ref?: keyof RefLists;
   required?: boolean;
   row?: string;
@@ -87,8 +87,9 @@ const OBJECT_FIELDS: {
   { key: "name_own", label: "Наименование собственника", type: "textarea", required: true },
   { key: "company_located", label: "Юридический адрес собственника", type: "textarea" },
   { key: "place_obj", label: "Местонахождение объекта", type: "textarea" },
+  { key: "id_cities", label: "Город", type: "ref", ref: "cities" },
+  { key: "__district", label: "Район", type: "derived" },
   { key: "id_region", label: "Область", type: "ref", ref: "region" },
-  { key: "id_cities", label: "Район / город", type: "ref", ref: "cities" },
   { key: "id_group_place_save", label: "Наименование группы", type: "ref", ref: "group" },
   { key: "id_storage_scheme", label: "Схема складирования", type: "ref", ref: "storage" },
   { key: "id_gruops_degree", label: "Группы", type: "ref", ref: "degree" },
@@ -124,6 +125,13 @@ function newRowKey() {
 function str(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v);
+}
+
+function cityDistrictName(city: unknown): string {
+  if (!city || typeof city !== "object") return "";
+  const district = (city as Record<string, unknown>).id_district;
+  if (!district || typeof district !== "object") return "";
+  return str((district as Record<string, unknown>).name_district);
 }
 
 function fmtDate(v: unknown): string {
@@ -542,6 +550,10 @@ export function RhzoObjectHub() {
   const toastTimer = useRef<number | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [debouncedLocation, setDebouncedLocation] = useState("");
+  const [wasteCodeFilter, setWasteCodeFilter] = useState("");
+  const [debouncedWasteCode, setDebouncedWasteCode] = useState("");
   const [sortColumn, setSortColumn] = useState<string | null>("id_registration");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -572,13 +584,17 @@ export function RhzoObjectHub() {
   };
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQ(search.trim()), 300);
+    const t = window.setTimeout(() => {
+      setDebouncedQ(search.trim());
+      setDebouncedLocation(locationFilter.trim());
+      setDebouncedWasteCode(wasteCodeFilter.trim());
+    }, 300);
     return () => window.clearTimeout(t);
-  }, [search]);
+  }, [search, locationFilter, wasteCodeFilter]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQ, sortColumn, sortDir, pageSize, showExcluded]);
+  }, [debouncedQ, debouncedLocation, debouncedWasteCode, sortColumn, sortDir, pageSize, showExcluded]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -589,6 +605,8 @@ export function RhzoObjectHub() {
         size: String(pageSize),
       });
       if (debouncedQ) params.set("q", debouncedQ);
+      if (debouncedLocation) params.set("location", debouncedLocation);
+      if (debouncedWasteCode) params.set("wasteCode", debouncedWasteCode);
       if (sortColumn) {
         params.set("sort", sortColumn);
         params.set("dir", sortDir);
@@ -612,7 +630,7 @@ export function RhzoObjectHub() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedQ, sortColumn, sortDir, showExcluded]);
+  }, [page, pageSize, debouncedQ, debouncedLocation, debouncedWasteCode, sortColumn, sortDir, showExcluded]);
 
   useEffect(() => {
     void loadList();
@@ -789,13 +807,40 @@ export function RhzoObjectHub() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <ExcludeFilterControl showExcluded={showExcluded} onChange={setShowExcluded} />
+          <ExcludeFilterControl
+            showExcluded={showExcluded}
+            onChange={setShowExcluded}
+            hasAdditionalFilters={Boolean(locationFilter || wasteCodeFilter)}
+          >
+            <label className="hub-filter-field">
+              <span className="hub-filter-field-label">Область или район</span>
+              <input
+                type="search"
+                className="hub-filter-field-control"
+                placeholder="Введите название"
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+              />
+            </label>
+            <label className="hub-filter-field">
+              <span className="hub-filter-field-label">Код отхода</span>
+              <input
+                type="search"
+                className="hub-filter-field-control"
+                placeholder="Введите код"
+                value={wasteCodeFilter}
+                onChange={(e) => setWasteCodeFilter(e.target.value)}
+              />
+            </label>
+          </ExcludeFilterControl>
         </div>
         <button
           type="button"
           className="hub-link-btn"
           onClick={() => {
             setSearch("");
+            setLocationFilter("");
+            setWasteCodeFilter("");
             setSortColumn("id_registration");
             setSortDir("asc");
             setShowExcluded(false);
@@ -989,6 +1034,21 @@ export function RhzoObjectHub() {
                       );
                     }
 
+                    if (f.type === "derived") {
+                      return (
+                        <div key={f.key} className="hub-field">
+                          {label}
+                          <input
+                            className="hub-input"
+                            disabled
+                            value={cityDistrictName(form.bundle.object.id_cities)}
+                            placeholder="Выберите город"
+                            readOnly
+                          />
+                        </div>
+                      );
+                    }
+
                     if (f.type === "ref" && f.ref) {
                       const idField =
                         f.ref === "region"
@@ -1006,7 +1066,7 @@ export function RhzoObjectHub() {
                         f.ref === "region"
                           ? (r: Record<string, unknown>) => formatRegion(r)
                           : f.ref === "cities"
-                            ? (r: Record<string, unknown>) => formatCity(r) || str(r.name_cities)
+                            ? (r: Record<string, unknown>) => str(r.name_cities)
                             : f.ref === "group"
                               ? (r: Record<string, unknown>) => formatGroupPlace(r)
                               : f.ref === "storage"
@@ -1020,7 +1080,13 @@ export function RhzoObjectHub() {
                             disabled={readOnly}
                             valueLabel={comboLabel(val, idField, labelFn)}
                             options={opts}
-                            onPick={(opt) => updateObjectField(f.key, opt?.raw ?? null)}
+                            onPick={(opt) => {
+                              updateObjectField(f.key, opt?.raw ?? null);
+                              if (f.ref === "cities") {
+                                const cityRegion = opt?.raw.id_region;
+                                updateObjectField("id_region", cityRegion ?? null);
+                              }
+                            }}
                           />
                         </div>
                       );

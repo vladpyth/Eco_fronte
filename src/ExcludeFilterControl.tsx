@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./ExcludeFilterControl.css";
 
 function IconFilter() {
@@ -20,6 +20,8 @@ type Props = {
   /** Подпись тумблера */
   label?: string;
   className?: string;
+  children?: ReactNode;
+  hasAdditionalFilters?: boolean;
 };
 
 /** Иконка фильтра у поиска + окно с тумблером «показывать исключённые». */
@@ -28,6 +30,8 @@ export function ExcludeFilterControl({
   onChange,
   label = "Показывать исключённые объекты",
   className,
+  children,
+  hasAdditionalFilters = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -53,7 +57,7 @@ export function ExcludeFilterControl({
     <div className={`hub-filter-wrap${className ? ` ${className}` : ""}`} ref={wrapRef}>
       <button
         type="button"
-        className="hub-filter-btn"
+        className={`hub-filter-btn${showExcluded || hasAdditionalFilters ? " hub-filter-btn--active" : ""}`}
         aria-label="Фильтры списка"
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -65,6 +69,7 @@ export function ExcludeFilterControl({
       {open ? (
         <div className="hub-filter-popover" role="dialog" aria-label="Настройки фильтра">
           <div className="hub-filter-popover-title">Фильтры</div>
+          {children ? <div className="hub-filter-fields">{children}</div> : null}
           <div className="hub-filter-row">
             <span className="hub-filter-row-label">{label}</span>
             <button

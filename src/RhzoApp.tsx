@@ -677,10 +677,8 @@ type GridCardState = {
 function PhoneModal(props: {
   row: Record<string, unknown>;
   phoneKind: PhoneKind;
-  allPhones: Record<string, unknown>[];
   onClose: () => void;
   onRefresh: () => Promise<void>;
-  onRefreshAll: () => Promise<void>;
   onLinkExisting: (phoneId: number, numberValue: string) => Promise<void>;
   showToast: (msg: string) => void;
   draftLocal?: {
@@ -700,7 +698,32 @@ function PhoneModal(props: {
       .filter((id): id is number => typeof id === "number")
   );
   const [draft, setDraft] = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [allPhones, setAllPhones] = useState<Record<string, unknown>[]>([]);
   const oid = props.row.id_object_place_trash;
+
+  const loadPhones = useCallback(async (query: string) => {
+    const params = new URLSearchParams({ page: "0", size: "50" });
+    if (query) params.set("q", query);
+    try {
+      const data = await apiGet<PagePayload<Record<string, unknown>>>(
+        `/api/number-phone?${params}`
+      );
+      setAllPhones(Array.isArray(data.content) ? data.content : []);
+    } catch {
+      setAllPhones([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    void loadPhones(debouncedSearch);
+  }, [debouncedSearch, loadPhones]);
 
   const remove = async (rec: Record<string, unknown>) => {
     if (props.draftLocal) {
@@ -714,7 +737,7 @@ function PhoneModal(props: {
       await apiDelete(`/api/object-place-trash/${oid}/number-phone/${id}`);
       props.showToast("Номер отвязан от объекта");
       await props.onRefresh();
-      await props.onRefreshAll();
+      await loadPhones(debouncedSearch);
     } catch (e) {
       props.showToast(e instanceof Error ? e.message : "Ошибка");
     }
@@ -739,19 +762,20 @@ function PhoneModal(props: {
       setDraft("");
       props.showToast("Добавлено");
       await props.onRefresh();
-      await props.onRefreshAll();
+      await loadPhones(debouncedSearch);
     } catch (e) {
       props.showToast(e instanceof Error ? e.message : "Ошибка");
     }
   };
 
-  const linkExisting = (phoneId: number, numberValue: string) => {
+  const linkExisting = async (phoneId: number, numberValue: string) => {
     if (props.draftLocal) {
       props.draftLocal.onLinkExisting(phoneId, numberValue);
       props.showToast("Номер добавлен");
       return;
     }
-    void props.onLinkExisting(phoneId, numberValue);
+    await props.onLinkExisting(phoneId, numberValue);
+    await loadPhones(debouncedSearch);
   };
 
   return (
@@ -829,6 +853,16 @@ function PhoneModal(props: {
             </tbody>
           </table>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Все занесенные номера</div>
+          <div className="modal-toolbar">
+            <input
+              className="cell-input-minimal"
+              style={{ flex: 1, minWidth: 160 }}
+              type="search"
+              placeholder="Поиск номера..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
           <table className="modal-table">
             <thead>
               <tr>
@@ -838,14 +872,14 @@ function PhoneModal(props: {
               </tr>
             </thead>
             <tbody>
-              {props.allPhones.length === 0 ? (
+              {allPhones.length === 0 ? (
                 <tr>
                   <td colSpan={3} style={{ color: "#71717a" }}>
                     Нет номеров
                   </td>
                 </tr>
               ) : (
-                props.allPhones.map((p) => {
+                allPhones.map((p) => {
                   const rec = p as Record<string, unknown>;
                   const id = rec.id_phone_number;
                   const linked = typeof id === "number" && linkedIds.has(id);
@@ -860,7 +894,7 @@ function PhoneModal(props: {
                           <button
                             type="button"
                             className="btn-small"
-                            onClick={() => linkExisting(id, str(rec.number))}
+                            onClick={() => void linkExisting(id, str(rec.number))}
                           >
                             Добавить
                           </button>
@@ -1058,6 +1092,37 @@ function GridReferenceModal(props: {
   const spec = GRID_REF_SPECS[props.kind];
   const idKey = spec.idField;
   const [draft, setDraft] = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [remoteRows, setRemoteRows] = useState<Record<string, unknown>[]>([]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    if (!spec.paginated) return;
+    let active = true;
+    const params = new URLSearchParams({ page: "0", size: "50" });
+    if (debouncedSearch) params.set("q", debouncedSearch);
+    void apiGet<PagePayload<Record<string, unknown>>>(`${spec.apiPath}?${params}`)
+      .then((data) => {
+        if (active) setRemoteRows(Array.isArray(data.content) ? data.content : []);
+      })
+      .catch(() => {
+        if (active) setRemoteRows([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [spec, debouncedSearch]);
+
+  const visibleRows = spec.paginated
+    ? remoteRows
+    : props.rows.filter((row) =>
+        spec.display(row).toLowerCase().includes(search.trim().toLowerCase())
+      );
 
   const add = async () => {
     try {
@@ -1104,6 +1169,16 @@ function GridReferenceModal(props: {
             <input
               className="cell-input-minimal"
               style={{ flex: 1, minWidth: 160 }}
+              type="search"
+              placeholder="Поиск..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="modal-toolbar">
+            <input
+              className="cell-input-minimal"
+              style={{ flex: 1, minWidth: 160 }}
               placeholder={spec.placeholder}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -1121,12 +1196,12 @@ function GridReferenceModal(props: {
                 </tr>
               </thead>
               <tbody>
-                {props.rows.length === 0 ? (
+                {visibleRows.length === 0 ? (
                   <tr>
                     <td style={{ color: "#71717a" }}>Нет данных</td>
                   </tr>
                 ) : (
-                  props.rows.map((item) => (
+                  visibleRows.map((item) => (
                     <tr key={str(item[idKey])} onClick={() => props.onPick(item)}>
                       <td>{spec.display(item)}</td>
                     </tr>
@@ -1800,7 +1875,6 @@ export function RhzoApp() {
     null
   );
   const [objectCreateSubmitting, setObjectCreateSubmitting] = useState(false);
-  const [allPhones, setAllPhones] = useState<Record<string, unknown>[]>([]);
   const [allAroundBuilds, setAllAroundBuilds] = useState<Record<string, unknown>[]>([]);
   const [allNaturalBuilds, setAllNaturalBuilds] = useState<Record<string, unknown>[]>([]);
 
@@ -1824,7 +1898,6 @@ export function RhzoApp() {
         typeTrash1,
         levelTrash,
         nameGroup,
-        objectPlaceTrash,
         physicalState,
       ] = await Promise.all([
         apiGet<Record<string, unknown>[]>("/api/cities"),
@@ -1838,7 +1911,6 @@ export function RhzoApp() {
         apiGet<Record<string, unknown>[]>("/api/type-trash1"),
         apiGet<Record<string, unknown>[]>("/api/level-trash"),
         apiGet<Record<string, unknown>[]>("/api/name-group"),
-        apiGet<Record<string, unknown>[]>("/api/object-place-trash"),
         apiGet<Record<string, unknown>[]>("/api/physical-state"),
       ]);
       setRefCache({ cities, region: regions, group, storage, degree, magazin });
@@ -1849,7 +1921,7 @@ export function RhzoApp() {
         typeTrash1,
         levelTrash,
         nameGroup,
-        objectPlaceTrash: Array.isArray(objectPlaceTrash) ? objectPlaceTrash : [],
+        objectPlaceTrash: [],
         magazinTrashCode: Array.isArray(magazin) ? magazin : [],
         magazinTrashName: Array.isArray(magazin) ? magazin : [],
         physicalState: Array.isArray(physicalState) ? physicalState : [],
@@ -1870,6 +1942,36 @@ export function RhzoApp() {
     },
     []
   );
+
+  useEffect(() => {
+    if (!editingGridRef) return;
+    const spec = GRID_REF_SPECS[editingGridRef.kind];
+    if (!spec.paginated) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ page: "0", size: "50" });
+      const query = editingGridRef.filter.trim();
+      if (query) params.set("q", query);
+      void apiGet<PagePayload<Record<string, unknown>>>(`${spec.apiPath}?${params}`)
+        .then((data) => {
+          if (!active) return;
+          setGridRefLists((prev) => {
+            const current = prev[editingGridRef.kind] ?? [];
+            const byId = new Map<number, Record<string, unknown>>();
+            for (const row of current) byId.set(pickFk(row, spec.idField), row);
+            for (const row of Array.isArray(data.content) ? data.content : []) {
+              byId.set(pickFk(row, spec.idField), row);
+            }
+            return { ...prev, [editingGridRef.kind]: [...byId.values()] };
+          });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [editingGridRef]);
 
   const refreshCharacteristicTrashList = useCallback(async () => {
     try {
@@ -1934,15 +2036,6 @@ export function RhzoApp() {
       ]);
       setAllAroundBuilds(around);
       setAllNaturalBuilds(natural);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const loadAllPhones = useCallback(async () => {
-    try {
-      const list = await apiGet<Record<string, unknown>[]>("/api/number-phone");
-      setAllPhones(list);
     } catch {
       /* ignore */
     }
@@ -2019,10 +2112,6 @@ export function RhzoApp() {
   useEffect(() => {
     void loadGlobalRelationLists();
   }, [loadGlobalRelationLists]);
-
-  useEffect(() => {
-    void loadAllPhones();
-  }, [loadAllPhones]);
 
   useEffect(() => {
     setEditingGridRef(null);
@@ -2148,7 +2237,6 @@ export function RhzoApp() {
           ur_ob: resolvePhoneStatusForNumber(row, trimmed, "owner"),
         });
         await refreshObjectRow(id);
-        await loadAllPhones();
         showToast("Телефон добавлен");
         return true;
       } catch (e) {
@@ -2156,7 +2244,7 @@ export function RhzoApp() {
         return false;
       }
     },
-    [loadAllPhones, rows, refreshObjectRow, showToast]
+    [rows, refreshObjectRow, showToast]
   );
 
   const linkExistingPhoneToObject = useCallback(
@@ -2171,13 +2259,12 @@ export function RhzoApp() {
           ur_ob: resolvePhoneStatusForNumber(row, numberValue, kind),
         });
         await refreshObjectRow(objectId);
-        await loadAllPhones();
         showToast("Номер привязан");
       } catch (e) {
         showToast(e instanceof Error ? e.message : "Ошибка");
       }
     },
-    [loadAllPhones, refreshObjectRow, rows, showToast]
+    [refreshObjectRow, rows, showToast]
   );
 
   const relationPath = (kind: ObjectRelationKind, objectId: number) =>
@@ -2632,7 +2719,6 @@ export function RhzoApp() {
       await loadSection("objects");
       void loadRefs();
       void loadGlobalRelationLists();
-      void loadAllPhones();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Ошибка");
     } finally {
@@ -3685,10 +3771,8 @@ export function RhzoApp() {
         <PhoneModal
           row={objectCreateDisplay}
           phoneKind={phoneModal.kind}
-          allPhones={allPhones}
           onClose={() => setPhoneModal(null)}
           onRefresh={async () => {}}
-          onRefreshAll={loadAllPhones}
           onLinkExisting={async () => {}}
           showToast={showToast}
           draftLocal={{
@@ -3706,14 +3790,12 @@ export function RhzoApp() {
           <PhoneModal
             row={rows[phoneModal.rowIndex]}
             phoneKind={phoneModal.kind}
-            allPhones={allPhones}
             onClose={() => setPhoneModal(null)}
             onRefresh={async () => {
               const r = rows[phoneModal.rowIndex];
               const id = r?.id_object_place_trash;
               if (typeof id === "number") await refreshObjectRow(id);
             }}
-            onRefreshAll={loadAllPhones}
             onLinkExisting={async (phoneId, numberValue) => {
               await linkExistingPhoneToObject(
                 phoneModal.rowIndex,

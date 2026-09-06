@@ -46,6 +46,9 @@ export function PooRegistryApp(props: PooRegistryAppProps) {
     const entries = await Promise.all(
       kinds.map(async (kind) => {
         const spec = ROO_GRID_REF_SPECS[kind];
+        if (spec.paginated) {
+          return [kind, [] as Record<string, unknown>[]] as const;
+        }
         try {
           const list = await apiGet<Record<string, unknown>[]>(spec.apiPath);
           return [kind, Array.isArray(list) ? list : ([] as Record<string, unknown>[])] as const;

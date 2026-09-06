@@ -20,6 +20,7 @@ export const GRID_REF_SPECS: Record<
   {
     apiPath: string;
     idField: string;
+    paginated?: boolean;
     nullable?: boolean;
     display: (r: Record<string, unknown>) => string;
     modalTitle: string;
@@ -111,6 +112,7 @@ export const GRID_REF_SPECS: Record<
   objectPlaceTrash: {
     apiPath: "/api/object-place-trash",
     idField: "id_object_place_trash",
+    paginated: true,
     display: (r) => String(r.register ?? ""),
     modalTitle: "Объект размещения",
     primaryHeader: "Рег. номер",

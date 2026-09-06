@@ -3,6 +3,15 @@ import { GRID_REF_SPECS, type GridRefKind } from "./gridRefConfig";
 
 export type { GridRefKind } from "./gridRefConfig";
 
+type PagePayload<T> = { content: T[] };
+
+async function firstPageRow(path: string): Promise<Record<string, unknown> | undefined> {
+  const data = await apiGet<PagePayload<Record<string, unknown>>>(
+    `${path}?page=0&size=1`
+  );
+  return Array.isArray(data.content) ? data.content[0] : undefined;
+}
+
 export type GridSectionId =
   | "around-build"
   | "characteristic-trash"
@@ -267,17 +276,17 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       };
     },
     createDefault: async () => {
-      const [regions, districts] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/region"),
-        apiGet<Record<string, unknown>[]>("/api/district"),
+      const [region, district] = await Promise.all([
+        firstPageRow("/api/region"),
+        firstPageRow("/api/district"),
       ]);
       const rid =
-        regions[0] && typeof regions[0].id_region === "number"
-          ? regions[0].id_region
+        region && typeof region.id_region === "number"
+          ? region.id_region
           : 1;
       const did =
-        districts[0] && typeof districts[0].id_district === "number"
-          ? districts[0].id_district
+        district && typeof district.id_district === "number"
+          ? district.id_district
           : 1;
       return {
         idRegion: rid,
@@ -334,20 +343,20 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
     toRequest: (row) => magazinTrashApiBody(row),
     createDefault: async () => {
       const [tt, lv, ng] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/type-trash1"),
-        apiGet<Record<string, unknown>[]>("/api/level-trash"),
-        apiGet<Record<string, unknown>[]>("/api/name-group"),
+        firstPageRow("/api/type-trash1"),
+        firstPageRow("/api/level-trash"),
+        firstPageRow("/api/name-group"),
       ]);
-      if (!tt?.length || !lv?.length || !ng?.length) {
+      if (!tt || !lv || !ng) {
         throw new Error(
           "Сначала добавьте записи в справочники: «Типы отходов», «Уровни отходов», «Группы отходов»."
         );
       }
       return {
         idClassDanger: FK_CLEAR,
-        idTypeTrash: pickFk(tt[0], "id_type_trash1"),
-        idLevelTrash: pickFk(lv[0], "id_level_trash"),
-        idMameGroup: pickFk(ng[0], "id_mame_group"),
+        idTypeTrash: pickFk(tt, "id_type_trash1"),
+        idLevelTrash: pickFk(lv, "id_level_trash"),
+        idMameGroup: pickFk(ng, "id_mame_group"),
         codeTrash: `C${Date.now() % 1e8}`.slice(0, 8),
         nameTrash: "Новый отход",
         block1: 1,
@@ -398,15 +407,15 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       squareForYear: Number(row.square_for_year ?? 0),
     }),
     createDefault: async () => {
-      const [objs, mag, st] = await Promise.all([
-        apiGet<Record<string, unknown>[]>("/api/object-place-trash"),
-        apiGet<Record<string, unknown>[]>("/api/magazin-trash"),
-        apiGet<Record<string, unknown>[]>("/api/physical-state"),
+      const [obj, mag, st] = await Promise.all([
+        firstPageRow("/api/object-place-trash"),
+        firstPageRow("/api/magazin-trash"),
+        firstPageRow("/api/physical-state"),
       ]);
       return {
-        idObjectPlaceTrash: pickFk(objs[0], "id_object_place_trash"),
-        idMagazinTrash: pickFk(mag[0], "id_magazin_trash"),
-        idState: pickFk(st[0], "id_state"),
+        idObjectPlaceTrash: pickFk(obj, "id_object_place_trash"),
+        idMagazinTrash: pickFk(mag, "id_magazin_trash"),
+        idState: pickFk(st, "id_state"),
         weightForYear: 0,
         squareForYear: 0,
       };
@@ -440,10 +449,10 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       trashCount: Number(row.trash_count ?? 0),
     }),
     createDefault: async () => {
-      const objs = await apiGet<Record<string, unknown>[]>("/api/object-place-trash");
+      const obj = await firstPageRow("/api/object-place-trash");
       return {
         registrNumber: `CL-${Date.now() % 1e6}`,
-        idObjectPlaceTrash: pickFk(objs[0], "id_object_place_trash"),
+        idObjectPlaceTrash: pickFk(obj, "id_object_place_trash"),
         nameObject: "Новое сооружение",
         startUse: new Date().getFullYear(),
         allSquare: 0,
@@ -475,9 +484,9 @@ export const GRID_SECTIONS: Record<GridSectionId, GridSectionDef> = {
       return body;
     },
     createDefault: async () => {
-      const objs = await apiGet<Record<string, unknown>[]>("/api/object-place-trash");
+      const obj = await firstPageRow("/api/object-place-trash");
       return {
-        idObjectPlaceTrash: pickFk(objs[0], "id_object_place_trash"),
+        idObjectPlaceTrash: pickFk(obj, "id_object_place_trash"),
         number: "+70000000000",
         ur_ob: 0,
       };

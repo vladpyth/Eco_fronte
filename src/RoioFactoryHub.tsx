@@ -198,7 +198,7 @@ const LIST_COLS: { key: string; label: string }[] = [
 const FACTORY_FIELDS: {
   key: string;
   label: string;
-  type?: "text" | "date" | "number" | "bool" | "textarea" | "ref";
+  type?: "text" | "date" | "number" | "bool" | "textarea" | "ref" | "derived";
   ref?: keyof RefLists;
   required?: boolean;
   row?: string;
@@ -211,6 +211,8 @@ const FACTORY_FIELDS: {
   { key: "address_own", label: "Адрес собственника", type: "textarea" },
   { key: "address_obj", label: "Адрес объекта", type: "textarea" },
   { key: "id_cities", label: "Город", type: "ref", ref: "cities" },
+  { key: "__district", label: "Район", type: "derived" },
+  { key: "__region", label: "Область", type: "derived" },
   { key: "id_short_discribe_technology", label: "Краткое описание технологии", type: "ref", ref: "shortTech" },
   { key: "develop_organization", label: "Организация-разработчик проекта", type: "textarea" },
   { key: "confirmed_project", label: "Утвердил проект", type: "textarea" },
@@ -247,6 +249,13 @@ export type FactoryHubVariant = "roio" | "ponoinput";
 function str(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v);
+}
+
+function cityAreaName(city: unknown, relation: "id_district" | "id_region", field: string): string {
+  if (!city || typeof city !== "object") return "";
+  const related = (city as Record<string, unknown>)[relation];
+  if (!related || typeof related !== "object") return "";
+  return str((related as Record<string, unknown>)[field]);
 }
 
 function fmtDate(v: unknown): string {
@@ -362,15 +371,36 @@ function emptyFactory(): Record<string, unknown> {
   };
 }
 
+async function loadPagedFactoryRows(
+  path: string,
+  factoryId: number
+): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+  let page = 0;
+  let totalPages = 1;
+  do {
+    const params = new URLSearchParams({
+      factoryId: String(factoryId),
+      page: String(page),
+      size: "50",
+    });
+    const data = await apiGet<PagePayload<Record<string, unknown>>>(`${path}?${params}`);
+    rows.push(...(Array.isArray(data.content) ? data.content : []));
+    totalPages = Math.max(1, Number(data.totalPages) || 1);
+    page += 1;
+  } while (page < totalPages);
+  return rows;
+}
+
 async function loadRelatedForFactory(
   factoryId: number,
   _registration?: string
 ): Promise<Pick<HubFactoryBundle, "phones" | "technologies" | "dropAirs" | "myTrashes">> {
   const [factoryDetail, techList, dropList, trashList] = await Promise.all([
     apiGet<Record<string, unknown>>(`/api/magasin-factory/${factoryId}`).catch(() => null),
-    apiGet<Record<string, unknown>[]>(`/api/technology?factoryId=${factoryId}`).catch(() => []),
-    apiGet<Record<string, unknown>[]>(`/api/drop-air?factoryId=${factoryId}`).catch(() => []),
-    apiGet<Record<string, unknown>[]>(`/api/my-trash?factoryId=${factoryId}`).catch(() => []),
+    loadPagedFactoryRows("/api/technology", factoryId).catch(() => []),
+    loadPagedFactoryRows("/api/drop-air", factoryId).catch(() => []),
+    loadPagedFactoryRows("/api/my-trash", factoryId).catch(() => []),
   ]);
 
   const asList = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v : []);
@@ -425,6 +455,11 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
   const toastTimer = useRef<number | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [debouncedLocation, setDebouncedLocation] = useState("");
+  const [wasteCodeFilter, setWasteCodeFilter] = useState("");
+  const [debouncedWasteCode, setDebouncedWasteCode] = useState("");
+  const [wasteSource, setWasteSource] = useState("");
   const [sortColumn, setSortColumn] = useState<string | null>("id_registration");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -459,13 +494,17 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
   }, []);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQ(search.trim()), 300);
+    const t = window.setTimeout(() => {
+      setDebouncedQ(search.trim());
+      setDebouncedLocation(locationFilter.trim());
+      setDebouncedWasteCode(wasteCodeFilter.trim());
+    }, 300);
     return () => window.clearTimeout(t);
-  }, [search]);
+  }, [search, locationFilter, wasteCodeFilter]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQ, sortColumn, sortDir, pageSize, showExcluded]);
+  }, [debouncedQ, debouncedLocation, debouncedWasteCode, wasteSource, sortColumn, sortDir, pageSize, showExcluded]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -476,6 +515,9 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
         size: String(pageSize),
       });
       if (debouncedQ) params.set("q", debouncedQ);
+      if (debouncedLocation) params.set("location", debouncedLocation);
+      if (debouncedWasteCode) params.set("wasteCode", debouncedWasteCode);
+      if (wasteSource) params.set("wasteSource", wasteSource);
       if (sortColumn) {
         params.set("sort", sortColumn);
         params.set("dir", sortDir);
@@ -492,7 +534,7 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedQ, sortColumn, sortDir, showExcluded]);
+  }, [page, pageSize, debouncedQ, debouncedLocation, debouncedWasteCode, wasteSource, sortColumn, sortDir, showExcluded]);
 
   useEffect(() => {
     void loadList();
@@ -683,13 +725,53 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <ExcludeFilterControl showExcluded={showExcluded} onChange={setShowExcluded} />
+          <ExcludeFilterControl
+            showExcluded={showExcluded}
+            onChange={setShowExcluded}
+            hasAdditionalFilters={Boolean(locationFilter || wasteCodeFilter || wasteSource)}
+          >
+            <label className="hub-filter-field">
+              <span className="hub-filter-field-label">Область или район</span>
+              <input
+                type="search"
+                className="hub-filter-field-control"
+                placeholder="Введите название"
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+              />
+            </label>
+            <label className="hub-filter-field">
+              <span className="hub-filter-field-label">Код отхода</span>
+              <input
+                type="search"
+                className="hub-filter-field-control"
+                placeholder="Введите код"
+                value={wasteCodeFilter}
+                onChange={(e) => setWasteCodeFilter(e.target.value)}
+              />
+            </label>
+            <label className="hub-filter-field">
+              <span className="hub-filter-field-label">Происхождение отходов</span>
+              <select
+                className="hub-filter-field-control"
+                value={wasteSource}
+                onChange={(e) => setWasteSource(e.target.value)}
+              >
+                <option value="">Все отходы</option>
+                <option value="own">Собственные отходы</option>
+                <option value="external">От сторонних организаций</option>
+              </select>
+            </label>
+          </ExcludeFilterControl>
         </div>
         <button
           type="button"
           className="hub-link-btn"
           onClick={() => {
             setSearch("");
+            setLocationFilter("");
+            setWasteCodeFilter("");
+            setWasteSource("");
             setSortColumn("id_registration");
             setSortDir("asc");
             setShowExcluded(false);
@@ -873,6 +955,20 @@ export function RoioFactoryHub(props: { variant?: FactoryHubVariant } = {}) {
                             <span>нет</span>
                           </label>
                         </div>
+                      </div>
+                    );
+                  }
+
+                  if (f.type === "derived") {
+                    const city = form.bundle.factory.id_cities;
+                    const value =
+                      f.key === "__district"
+                        ? cityAreaName(city, "id_district", "name_district")
+                        : cityAreaName(city, "id_region", "name_region");
+                    return (
+                      <div key={f.key} className="hub-field">
+                        {label}
+                        <input className="hub-input" disabled value={value} placeholder="Выберите город" readOnly />
                       </div>
                     );
                   }
